@@ -63,7 +63,11 @@ The outcome of a testing phase: for each test case, whether it passed, failed or
 _Avoid_: Test results, test log
 
 **Evidence**:
-What a test report shows to back each outcome, such as command output, log excerpts, database query results, screenshots or recordings.
+What a test report shows to back each outcome, such as command output, log excerpts, database query results, screenshots or recordings. Inline evidence is short text the report embeds; anything larger or non-textual is a test artifact the evidence links to.
+
+**Test artifact**:
+A file a testing session saves alongside its test report and links from it: a markdown note, a JSON or text output file, a screenshot, or a video recording. Kept in the workspace's storage with the report, not in the worktree; it reaches a PR only when the developer attaches it through the open PR action (FR-30a). Not to be confused with a phase's required artifact, which is the report itself.
+_Avoid_: Attachment, asset, upload
 
 **Blocked** (test case):
 A test case that could not be run at all, as opposed to one that ran and failed.

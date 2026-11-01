@@ -58,7 +58,7 @@ It brings four things together:
 | **Implementer** | Writes the code for a planned ticket in its own working copy. |
 | **Tester** | Runs the plan's test cases: the project's automated tests, then end to end against the running software, and reports each result with evidence. |
 | **Code reviewer** | Reviews changes against the ticket and the project's coding standards. |
-| **PR / release helper** | Opens pull requests, writes their descriptions, and prepares hotfixes. |
+| **PR / release helper** | Opens pull requests, writes their descriptions, and prepares hotfixes. The PR can carry artifacts from every phase of the ticket: test reports, screenshots and video recordings of test runs, plan and investigation notes. |
 | **Orchestrator** | Chooses which of the above to run for each phase, and starts the session. |
 
 Each agent has **its own Slack user** (e.g. `@explorer`, `@bug-hunter`), so teammates address the right helper directly.
@@ -84,6 +84,7 @@ The developer works through a **web dashboard that runs on their own machine**.
 | | Automated & e2e testing phases | The tester runs the project's test suites, then exercises the real software: starts the service and calls its API, or sets env vars and invokes just the relevant lambda, then inspects logs and database contents. It never fixes code; failures go back to implementation. |
 | | Learned test strategy | The tester studies the codebase to work out how *this* project is best tested end to end, writes it down for your approval, and follows it from then on. You refine it by editing or annotating it. |
 | | Test reports with evidence | Every test case is passed, failed or blocked, backed by command output, log excerpts, database queries and screenshots. |
+| | Test artifacts | Files the tester saves with the report and links from each case: markdown notes, JSON and text outputs, screenshots, and video recordings of a run. Viewed, zoomed, played and annotated in the dashboard; stored with the report, never in the PR. |
 | | Inspection hooks | Read-only hooks into the systems the project writes to: databases, S3 buckets, CloudWatch and serverless logs, queues. The tester reads through them to prove what a test case left behind, and asks for new ones when a check needs a system it cannot see. Credentials stay in the workspace; sessions only get the read-only tools. |
 | **Bug investigation** | Prod-like reproduction | The bug investigator sets up an isolated copy of the project with production-like data and runs tests to confirm a bug. |
 | **Code questions** | Ask the explorer | Teammates ask code questions in Slack and get answers from the explorer agent. |
@@ -97,7 +98,7 @@ The developer works through a **web dashboard that runs on their own machine**.
 | Release | Includes |
 |---|---|
 | **MVP (first release)** | Workspaces & source linking · ticket view · session tracker (**Claude Code** first) · orchestrator with one-click session start · agents & skills manager · built-in project knowledge · drafted actions with approvals inbox · code editor & document viewer · annotations & correction rounds for planning, implementation, test reports and the test strategy · automated & e2e testing phases with test cases, learned test strategy and evidence-backed test reports (local environments only) · token usage tracker · ambient setup view (user-level source off by default) |
-| **Later** | Slack agents (explorer, per-agent Slack users, Slack replies through the approvals inbox) · bug investigator with prod-like reproduction · support for other AI coding tools · screen recordings as e2e evidence · test strategies that reach shared or remote environments · switches for individual ambient items and other sources · token budgets |
+| **Later** | Slack agents (explorer, per-agent Slack users, Slack replies through the approvals inbox) · bug investigator with prod-like reproduction · support for other AI coding tools · automatic browser driving for frontend recordings · test strategies that reach shared or remote environments · switches for individual ambient items and other sources · token budgets |
 
 ## 5. 🚶 User Journeys
 
