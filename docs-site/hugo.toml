@@ -1,0 +1,15 @@
+baseURL = "http://localhost:1313/"
+title = "Slop Control Docs"
+languageCode = "en-us"
+
+# Serve the project's /docs folder as content — docs stay in one place.
+contentDir = "../docs"
+
+disableKinds = ["taxonomy", "term", "rss", "sitemap"]
+
+[markup.goldmark.renderer]
+unsafe = true
+
+[markup.tableOfContents]
+startLevel = 2
+endLevel = 3

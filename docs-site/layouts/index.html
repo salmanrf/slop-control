@@ -1,0 +1,14 @@
+{{ define "main" }}
+{{ if .Content }}
+  {{ .Content }}
+{{ else }}
+  <h1>Slop Control Documentation</h1>
+  <p>Project documentation for Slop Control — tickets, agents, and AI coding sessions in one place.</p>
+{{ end }}
+<h2>Documents</h2>
+<ul>
+  {{ range .Site.RegularPages.ByTitle }}
+  <li><a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ with .Summary }} — {{ . | plainify | truncate 120 }}{{ end }}</li>
+  {{ end }}
+</ul>
+{{ end }}

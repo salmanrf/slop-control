@@ -1,0 +1,10 @@
+{
+  "name": "slop-control",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slop Control — tickets, agents, and AI coding sessions in one place",
+  "scripts": {
+    "start:docs": "(sleep 1 && open http://localhost:1313) & hugo server --source docs-site --port 1313",
+    "build:docs": "hugo --source docs-site --destination ../public-docs"
+  }
+}
