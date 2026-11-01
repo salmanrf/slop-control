@@ -1,0 +1,35 @@
+#!/bin/sh
+# Rejects commits whose subject line doesn't follow Conventional Commits:
+#   <type>[(scope)][!]: <description>
+# Enabled by `npm install` (see the "prepare" script in package.json), or
+# manually with: git config core.hooksPath .githooks
+
+types='feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert'
+pattern="^($types)(\([^()]+\))?!?: [^ ].*"
+
+# First line that isn't blank or a comment; the file still holds git's
+# commented template at this point.
+subject=$(grep -v -E '^[[:space:]]*(#|$)' "$1" | head -n 1)
+
+# An empty message: let git abort with its own error.
+[ -z "$subject" ] && exit 0
+
+# Subjects git generates itself.
+case "$subject" in
+  'Merge '* | 'Revert "'* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+printf '%s\n' "$subject" | grep -q -E "$pattern" && exit 0
+
+cat >&2 <<EOF
+Commit rejected: the subject must start with a standard prefix.
+
+  Got:      $subject
+  Expected: <type>[(scope)][!]: <description>
+  Types:    $(printf '%s' "$types" | sed 's/|/, /g')
+
+  Examples: feat: add session status pushes
+            fix(api): handle an empty ticket list
+            docs!: rename the glossary terms
+EOF
+exit 1

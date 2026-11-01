@@ -4,6 +4,7 @@
   "private": true,
   "description": "Slop Control — tickets, agents, and AI coding sessions in one place",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "start:docs": "(sleep 1 && open http://localhost:1313) & hugo server --source docs-site --port 1313",
     "build:docs": "hugo --source docs-site --destination ../public-docs"
   }
