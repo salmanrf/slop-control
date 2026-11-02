@@ -6,6 +6,8 @@ export interface SessionStreamOptions {
   onSession: (session: Session) => void;
   /** Fires once subscribed, so the caller refetches and can't miss a change made in between. */
   onConnected: () => void;
+  /** Fires each time a connection is lost or can't be made, before the next attempt. */
+  onDisconnected?: () => void;
   onUnauthorized: () => void;
   fetchFn?: typeof fetch;
   retryDelayMs?: number;
@@ -28,6 +30,7 @@ export function connectSessionUpdates(options: SessionStreamOptions): () => void
     getToken,
     onSession,
     onConnected,
+    onDisconnected,
     onUnauthorized,
     fetchFn = (...args) => fetch(...args),
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
@@ -97,6 +100,7 @@ export function connectSessionUpdates(options: SessionStreamOptions): () => void
         onUnauthorized();
         return;
       }
+      onDisconnected?.();
       await new Promise<void>((resolve) => {
         retryTimer = setTimeout(resolve, retryDelayMs);
       });

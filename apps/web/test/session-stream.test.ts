@@ -34,6 +34,7 @@ function setup(responses: (Response | Error)[]) {
   });
   const onSession = vi.fn();
   const onConnected = vi.fn();
+  const onDisconnected = vi.fn();
   const onUnauthorized = vi.fn();
   let tokenCount = 0;
   const stop = connectSessionUpdates({
@@ -41,12 +42,13 @@ function setup(responses: (Response | Error)[]) {
     getToken: async () => `token-${++tokenCount}`,
     onSession,
     onConnected,
+    onDisconnected,
     onUnauthorized,
     fetchFn: fetchFn as unknown as typeof fetch,
     retryDelayMs: 1,
     staleAfterMs: 40,
   });
-  return { fetchFn, onSession, onConnected, onUnauthorized, stop };
+  return { fetchFn, onSession, onConnected, onDisconnected, onUnauthorized, stop };
 }
 
 describe('connectSessionUpdates', () => {
@@ -112,6 +114,17 @@ describe('connectSessionUpdates', () => {
       'Bearer token-2',
     );
     expect(t.onConnected).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a lost connection, so a view can say its status may be out of date', async () => {
+    const stream = openStream();
+    const t = setup([stream.response]);
+    cleanupStream = t.stop;
+    await flush();
+    expect(t.onDisconnected).not.toHaveBeenCalled();
+    stream.end();
+    await flush();
+    expect(t.onDisconnected).toHaveBeenCalledTimes(1);
   });
 
   it('retries after a network error', async () => {
