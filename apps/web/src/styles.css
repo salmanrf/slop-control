@@ -1,228 +1,143 @@
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1c1f24;
-  --muted: #667085;
-  --line: #d9dde3;
-  --surface: #f5f6f8;
-  --accent: #2f5fd0;
-  --danger: #b42318;
-  --ok: #1a7f4b;
-  --warn: #9a6700;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
-  line-height: 1.5;
+/*
+ * Layer order matters. Chakra emits reset, base, tokens and recipes; naming them first puts
+ * Tailwind's utilities after them, so a utility class always beats a Chakra recipe. Tailwind's own
+ * preflight stays out because Chakra's reset already covers it.
+ */
+@layer reset, base, tokens, recipes, theme, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme static {
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-ink: #15171c;
+  --color-ink-soft: #4b5160;
+  --color-muted: #5f6573;
+  --color-paper: #f4f4f1;
+  --color-paper-soft: #fafaf8;
+  --color-line: #e2e3de;
+  --color-line-soft: #eeefea;
+  --color-field: #d6d7d2;
+  --color-accent: #2a4fd6;
+  --color-accent-hover: #1c3aa6;
+
+  --color-nav: #15171c;
+  --color-nav-raised: #1e2127;
+  --color-nav-active: #2b2e36;
+  --color-nav-line: #3a3e47;
+  --color-nav-text: #e8e8e3;
+  --color-nav-soft: #c9cbc4;
+  --color-nav-muted: #9a9d96;
+  --color-code: #0e0f12;
+  --color-code-text: #d7d9d2;
+
+  --color-ok: #1b7f3b;
+  --color-ok-text: #1b6b35;
+  --color-ok-soft: #e3f5e8;
+  --color-ok-bright: #7ce0a3;
+  --color-warn: #d98e04;
+  --color-warn-text: #7a4a00;
+  --color-warn-soft: #fff9ec;
+  --color-warn-line: #f0d9a8;
+  --color-danger: #b42318;
+  --color-danger-text: #8a1c1c;
+  --color-danger-soft: #fdedec;
+  --color-danger-line: #e8b4b0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15171b;
-    --fg: #e7e9ec;
-    --muted: #98a2b3;
-    --line: #333841;
-    --surface: #1f2228;
-    --accent: #84a6f5;
-    --danger: #f97066;
-    --ok: #4cc38a;
-    --warn: #e2b93b;
+/* In a layer, or it would outrank every Tailwind color utility on a link. */
+@layer base {
+  a {
+    color: var(--color-accent);
+  }
+
+  a:hover {
+    color: var(--color-accent-hover);
   }
 }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-a {
-  color: var(--accent);
-}
-
-main {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
-}
-
-main.narrow {
-  max-width: 480px;
-}
-
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--line);
-}
-
-section {
-  margin-top: 24px;
-}
-
-h1 {
-  font-size: 1.5rem;
-}
-
-h2 {
-  font-size: 1.1rem;
-}
-
-small {
-  color: var(--muted);
-}
-
-input,
-select,
-button {
-  font: inherit;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-button {
-  cursor: pointer;
-  background: var(--surface);
-}
-
-button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-input:not([type='radio']) {
-  min-width: 0;
-  flex: 1;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.stack {
+.markdown {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.stack label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.list {
-  list-style: none;
-  padding: 0;
-}
-
-.list li {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
-.error {
-  color: var(--danger);
+.markdown h1,
+.markdown h2 {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.notice {
-  padding: 8px 12px;
-  background: var(--surface);
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown ul,
+.markdown ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 22px;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown a {
+  text-decoration: underline;
+}
+
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.markdown pre {
+  padding: 10px 12px;
+  overflow-x: auto;
   border-radius: 6px;
+  background: var(--color-paper);
 }
 
-.badge {
-  display: inline-block;
-  padding: 0 8px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 400;
-  color: var(--muted);
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--color-line);
+  color: var(--color-ink-soft);
 }
 
-.badge-running,
-.badge-starting {
-  color: var(--accent);
-}
-
-.badge-ended,
-.badge-artifact-complete {
-  color: var(--ok);
-}
-
-.badge-failed {
-  color: var(--danger);
-}
-
-.badge-artifact-incomplete,
-.badge-stopped {
-  color: var(--warn);
-}
-
-table {
+.markdown table {
   display: block;
-  width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
 }
 
-th,
-td {
+.markdown th,
+.markdown td {
   padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--color-line-soft);
   text-align: left;
-  border-bottom: 1px solid var(--line);
 }
 
-code,
-pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-
-pre {
-  padding: 12px;
-  background: var(--surface);
-  border-radius: 6px;
-  white-space: pre-wrap;
-}
-
-.copy-command {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--surface);
-  border-radius: 6px;
-}
-
-dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
-}
-
-dt {
-  color: var(--muted);
-}
-
-dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.markdown {
-  overflow-wrap: anywhere;
+.markdown hr {
+  border-color: var(--color-line);
 }
