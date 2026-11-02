@@ -40,10 +40,22 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
     private readonly redactor: Redactor,
   ) {}
 
-  /** The server owns the child processes, so it assumes they didn't survive a restart. */
+  /** The server owns the child processes, so nothing can re-attach to one after a restart. */
   async onApplicationBootstrap(): Promise<void> {
     for (const session of await this.store.listActive()) {
+      await this.terminateLeftovers(session);
       await this.finish(session, 'failed', 'server_restarted');
+    }
+  }
+
+  /** After a crash an agent can outlive the server, so it must stop before its session is closed. */
+  private async terminateLeftovers(session: Session): Promise<void> {
+    try {
+      await this.runtime.terminateLeftovers(session.worktreePath);
+    } catch (error) {
+      this.logger.warn(
+        `Couldn't check for a leftover agent in session ${session.id}: ${this.describe(error)}`,
+      );
     }
   }
 
@@ -58,6 +70,9 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   async start(workspaceId: string, ticketKey: string, phase: unknown): Promise<Session> {
+    if (this.shuttingDown) {
+      throw new ApiException(503, 'RUNTIME_NOT_READY', 'The server is shutting down.');
+    }
     await this.workspaces.get(workspaceId);
     const repos = await this.workspaces.listRepos(workspaceId);
     if (repos.length === 0) {

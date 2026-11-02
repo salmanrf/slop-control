@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent, RuntimeHandle } from '@slop-control/shared';
 import { ClaudeCodeRuntime, type SdkQuery } from '../src/sessions/claude-code.runtime';
@@ -299,6 +300,88 @@ describe('ClaudeCodeRuntime', () => {
     });
   });
 
+  describe('terminateLeftovers', () => {
+    const spawned: number[] = [];
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const start = (command: string, args: string[], cwd: string) => {
+      const child = spawn(command, args, { cwd, detached: true, stdio: 'ignore' });
+      child.unref();
+      spawned.push(child.pid!);
+      return child.pid!;
+    };
+    /** A process that looks like the SDK's Claude Code binary, with a tool command under it. */
+    const startAgent = async (cwd: string) => {
+      const dir = tempDir('slop-sdk-');
+      const binDir = join(dir, 'claude-agent-sdk-test');
+      mkdirSync(binDir);
+      const toolPidFile = join(dir, 'tool.pid');
+      const script = join(binDir, 'claude');
+      writeFileSync(script, `#!/bin/sh\nsleep 300 &\necho $! > ${toolPidFile}\nwait\n`);
+      chmodSync(script, 0o755);
+      const pid = start(script, [], cwd);
+      const deadline = Date.now() + 5000;
+      while (!existsSync(toolPidFile) || readFileSync(toolPidFile, 'utf8').trim() === '') {
+        if (Date.now() > deadline) throw new Error('The stand-in agent never started.');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const toolPid = Number(readFileSync(toolPidFile, 'utf8').trim());
+      spawned.push(toolPid);
+      return { pid, toolPid };
+    };
+    const waitUntilGone = async (pid: number) => {
+      const deadline = Date.now() + 5000;
+      while (alive(pid) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return !alive(pid);
+    };
+
+    afterEach(() => {
+      for (const pid of spawned.splice(0)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }
+    });
+
+    it('ends an agent left in the worktree, and the tool command under it', async () => {
+      const cwd = tempDir('slop-worktree-');
+      const { pid, toolPid } = await startAgent(cwd);
+      await makeRuntime(new ScriptedSdk()).terminateLeftovers(cwd);
+      expect(await waitUntilGone(pid)).toBe(true);
+      expect(await waitUntilGone(toolPid)).toBe(true);
+    });
+
+    it('leaves an agent in another worktree alone', async () => {
+      const { pid } = await startAgent(tempDir('slop-other-'));
+      await makeRuntime(new ScriptedSdk()).terminateLeftovers(tempDir('slop-worktree-'));
+      expect(alive(pid)).toBe(true);
+    });
+
+    it("leaves the developer's own processes in that worktree alone", async () => {
+      const cwd = tempDir('slop-worktree-');
+      const shell = start('sleep', ['301'], cwd);
+      await startAgent(cwd);
+      await makeRuntime(new ScriptedSdk()).terminateLeftovers(cwd);
+      expect(alive(shell)).toBe(true);
+    });
+
+    it('does nothing when the worktree is gone', async () => {
+      await expect(
+        makeRuntime(new ScriptedSdk()).terminateLeftovers(join(tempDir(), 'gone')),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('child environment (NFR-4)', () => {
     const saved = { ...process.env };
     afterEach(() => {
@@ -327,8 +410,20 @@ describe('ClaudeCodeRuntime', () => {
     });
 
     it('leaves out an allowlisted variable that holds the token', async () => {
-      process.env.CLAUDE_SOMETHING = `prefix-${CANARY_GITHUB_TOKEN}`;
-      expect(await envOfChild()).not.toHaveProperty('CLAUDE_SOMETHING');
+      process.env.ANTHROPIC_SOMETHING = `prefix-${CANARY_GITHUB_TOKEN}`;
+      expect(await envOfChild()).not.toHaveProperty('ANTHROPIC_SOMETHING');
+    });
+
+    it("leaves out a parent Claude Code session's own variables", async () => {
+      process.env.CLAUDECODE = '1';
+      process.env.CLAUDE_CODE_MESSAGING_TOKEN = 'parent-token';
+      process.env.CLAUDE_CODE_SESSION_ID = 'parent-session';
+      process.env.CLAUDE_PID = '123';
+      const env = await envOfChild();
+      expect(env).not.toHaveProperty('CLAUDECODE');
+      expect(env).not.toHaveProperty('CLAUDE_CODE_MESSAGING_TOKEN');
+      expect(env).not.toHaveProperty('CLAUDE_CODE_SESSION_ID');
+      expect(env).not.toHaveProperty('CLAUDE_PID');
     });
 
     it("keeps what Claude Code needs to run with the host's setup", async () => {

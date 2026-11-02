@@ -10,6 +10,8 @@ import { SessionRuntime } from '../../src/sessions/runtime';
 /** One scripted run. The test decides what the runtime reports and when. */
 export class FakeRun implements RuntimeHandle {
   stopCalls = 0;
+  /** Makes the run ignore `stop`, as a slow-to-die process would. */
+  ignoreStop = false;
   private readonly queue: (RuntimeEvent | { fail: Error } | 'close')[] = [];
   private wake: (() => void) | null = null;
   private finished = false;
@@ -36,7 +38,7 @@ export class FakeRun implements RuntimeHandle {
 
   async stop(): Promise<void> {
     this.stopCalls += 1;
-    if (this.stopCalls === 1 && !this.finished) this.ended('stopped');
+    if (this.stopCalls === 1 && !this.finished && !this.ignoreStop) this.ended('stopped');
   }
 
   readonly events: AsyncIterable<RuntimeEvent> = {
@@ -75,6 +77,8 @@ export class FakeRuntime extends SessionRuntime {
   readiness: RuntimeReadiness = { ready: true };
   throwOnStart: Error | null = null;
   readonly runs: FakeRun[] = [];
+  terminateFailure: Error | null = null;
+  readonly terminated: string[] = [];
 
   async checkReady(): Promise<RuntimeReadiness> {
     return this.readiness;
@@ -89,6 +93,10 @@ export class FakeRuntime extends SessionRuntime {
     const run = new FakeRun(input);
     this.runs.push(run);
     return run;
+  }
+  async terminateLeftovers(cwd: string): Promise<void> {
+    if (this.terminateFailure) throw this.terminateFailure;
+    this.terminated.push(cwd);
   }
   get lastRun(): FakeRun {
     return this.runs.at(-1)!;

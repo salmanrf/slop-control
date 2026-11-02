@@ -50,7 +50,12 @@ const ALLOWED_ENV = new Set([
   'https_proxy',
   'no_proxy',
 ]);
-const ALLOWED_ENV_PREFIXES = ['CLAUDE_', 'ANTHROPIC_'];
+/** Only the host's setup. Other `CLAUDE_*` names belong to a Claude Code session the server may run under. */
+const ALLOWED_CLAUDE_ENV = new Set(['CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN']);
+const ALLOWED_ENV_PREFIXES = ['ANTHROPIC_'];
+/** The SDK's own binary. A developer's `claude --resume` in the worktree doesn't run from here. */
+const SDK_BINARY_MARKER = 'claude-agent-sdk';
+const TERMINATE_GRACE_MS = 2000;
 
 const defaultDeps: ClaudeCodeDeps = {
   claudeCommand: 'claude',
@@ -103,6 +108,24 @@ export class ClaudeCodeRuntime extends SessionRuntime {
 
   resume(input: RuntimeResumeInput): RuntimeHandle {
     return this.open(input.message, input.cwd, { resume: input.runtimeSessionId });
+  }
+
+  async terminateLeftovers(cwd: string): Promise<void> {
+    let realCwd: string;
+    try {
+      realCwd = realpathSync(cwd);
+    } catch {
+      return;
+    }
+
+    const processes = await listProcesses();
+    const agents: number[] = [];
+    for (const { pid, command } of processes) {
+      if (command.includes(SDK_BINARY_MARKER) && (await processCwd(pid)) === realCwd) {
+        agents.push(pid);
+      }
+    }
+    await terminate(agents.flatMap((pid) => [pid, ...descendants(pid, processes)]));
   }
 
   private open(prompt: string, cwd: string, extra: Record<string, unknown>): RuntimeHandle {
@@ -226,12 +249,72 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     for (const [name, value] of Object.entries(process.env)) {
       if (value === undefined) continue;
       const allowed =
-        ALLOWED_ENV.has(name) || ALLOWED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+        ALLOWED_ENV.has(name) ||
+        ALLOWED_CLAUDE_ENV.has(name) ||
+        ALLOWED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
       const holdsSecret = this.config.githubToken !== '' && value.includes(this.config.githubToken);
       if (allowed && !holdsSecret) env[name] = value;
     }
     return env;
   }
+}
+
+interface HostProcess {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+function run(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) =>
+      error ? reject(error) : resolve(stdout),
+    );
+  });
+}
+
+async function listProcesses(): Promise<HostProcess[]> {
+  const output = await run('ps', ['-axo', 'pid=,ppid=,command=']);
+  return output.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    return match
+      ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] ?? '' }]
+      : [];
+  });
+}
+
+async function processCwd(pid: number): Promise<string | null> {
+  try {
+    const output = await run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn']);
+    const line = output.split('\n').find((candidate) => candidate.startsWith('n'));
+    return line ? line.slice(1) : null;
+  } catch {
+    return null;
+  }
+}
+
+function descendants(pid: number, processes: HostProcess[]): number[] {
+  const children = processes.filter((item) => item.ppid === pid).map((item) => item.pid);
+  return children.flatMap((child) => [child, ...descendants(child, processes)]);
+}
+
+function signal(pid: number, name: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(pid, name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function terminate(pids: number[]): Promise<void> {
+  const targets = pids.filter((pid) => pid !== process.pid);
+  targets.forEach((pid) => signal(pid, 'SIGTERM'));
+  const deadline = Date.now() + TERMINATE_GRACE_MS;
+  while (Date.now() < deadline && targets.some((pid) => signal(pid, 0))) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  targets.forEach((pid) => signal(pid, 'SIGKILL'));
 }
 
 function endedFromResult(message: SdkMessage): RuntimeEvent {

@@ -14,8 +14,10 @@ export interface Harness extends TestApp {
   tracker: FakeTracker;
 }
 
-export async function createHarness(options: TestAppOptions = {}): Promise<Harness> {
-  const runtime = new FakeRuntime();
+export async function createHarness(
+  options: TestAppOptions & { runtime?: FakeRuntime } = {},
+): Promise<Harness> {
+  const runtime = options.runtime ?? new FakeRuntime();
   const tracker = new FakeTracker();
   const app = await createTestApp({
     ...options,

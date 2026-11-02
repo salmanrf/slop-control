@@ -2,6 +2,7 @@ import type { LoggerService } from '@nestjs/common';
 import type { Session } from '@slop-control/shared';
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { FakeRuntime } from './support/fake-runtime';
 import { git, tempDir } from './support/git';
 import {
   createHarness,
@@ -378,6 +379,31 @@ describe('server restart', () => {
         expect(session.artifactStatus).toBe('incomplete');
       }
       expect((await read(finished.id)).status).toBe('ended');
+      expect([...second.runtime.terminated].sort()).toEqual(
+        [starting.worktreePath, running.worktreePath].sort(),
+      );
+    } finally {
+      await second.close();
+    }
+  });
+});
+
+describe('server restart when cleaning up fails', () => {
+  beforeEach(resetDatabase);
+
+  it('still marks the session failed and finishes booting', async () => {
+    const first = await createHarness();
+    const { workspaceId } = await seedWorkspace(first);
+    const session = await startSession(first, workspaceId);
+    await first.close();
+
+    const runtime = new FakeRuntime();
+    runtime.terminateFailure = new Error('lsof is missing');
+    const second = await createHarness({ runtime });
+    try {
+      const read = await second.api.get(`/workspaces/${workspaceId}/sessions/${session.id}`);
+      expect(read.body.status).toBe('failed');
+      expect(read.body.statusReason).toBe('server_restarted');
     } finally {
       await second.close();
     }

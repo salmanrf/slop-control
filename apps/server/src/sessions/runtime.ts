@@ -26,4 +26,11 @@ export abstract class SessionRuntime {
    * Continues an existing session with its context kept.
    */
   abstract resume(input: RuntimeResumeInput): RuntimeHandle;
+
+  /**
+   * @params cwd: the worktree a session was running in when the server died
+   * @return resolves once any process this runtime left there has been told to stop
+   * Ends what a crashed server left behind. Leaves everything else in that folder alone.
+   */
+  abstract terminateLeftovers(cwd: string): Promise<void>;
 }
