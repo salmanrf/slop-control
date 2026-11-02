@@ -216,23 +216,25 @@ function TicketList({
             ))}
           </Tabs.List>
         </Tabs.Root>
-        <label htmlFor="repo-select" className="ml-auto text-[12px] text-muted">
-          Repo
-        </label>
-        <NativeSelect.Root unstyled className="mb-1 w-auto">
-          <NativeSelect.Field
-            id="repo-select"
-            value={repo.id}
-            onChange={(event) => onSelectRepo(event.target.value)}
-            className="min-h-10 cursor-pointer rounded-lg border border-field bg-white px-2.5 py-2 text-[13px]"
-          >
-            {repos.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.githubOwner}/{item.githubRepo}
-              </option>
-            ))}
-          </NativeSelect.Field>
-        </NativeSelect.Root>
+        <div className="mb-1 ml-auto flex items-center gap-1.5">
+          <label htmlFor="repo-select" className="text-[12px] text-muted">
+            Repo
+          </label>
+          <NativeSelect.Root unstyled className="w-auto">
+            <NativeSelect.Field
+              id="repo-select"
+              value={repo.id}
+              onChange={(event) => onSelectRepo(event.target.value)}
+              className="min-h-10 cursor-pointer rounded-lg border border-field bg-white px-2.5 py-2 text-[13px]"
+            >
+              {repos.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.githubOwner}/{item.githubRepo}
+                </option>
+              ))}
+            </NativeSelect.Field>
+          </NativeSelect.Root>
+        </div>
       </div>
 
       <form
