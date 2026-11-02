@@ -91,6 +91,7 @@ export function ErrorMessage({ error }: { error: unknown }) {
   return (
     <Alert.Root
       unstyled
+      role="alert"
       status="error"
       className="flex items-start gap-2.5 rounded-[10px] border border-danger-line bg-danger-soft px-3.5 py-3 text-[13px] text-danger-text"
     >
