@@ -8,7 +8,8 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { supabase } from './lib/supabase';
+import { WorkspaceLayout } from './components/AppShell';
+import { clearSignInExpired, supabase, wasSignInExpired } from './lib/supabase';
 import { SessionPage } from './pages/SessionPage';
 import { SignInPage } from './pages/SignInPage';
 import { TicketPage } from './pages/TicketPage';
@@ -20,23 +21,26 @@ const queryClient = new QueryClient({
 });
 
 const rootRoute = createRootRoute({ component: Outlet });
+const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$workspaceId',
+  component: WorkspaceLayout,
+});
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: WorkspaceSelectorPage }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/w/$workspaceId',
-    component: WorkspacePage,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/w/$workspaceId/tickets/$ticketKey',
-    component: TicketPage,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/w/$workspaceId/sessions/$sessionId',
-    component: SessionPage,
-  }),
+  workspaceRoute.addChildren([
+    createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: WorkspacePage }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: 'tickets/$ticketKey',
+      component: TicketPage,
+    }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: 'sessions/$sessionId',
+      component: SessionPage,
+    }),
+  ]),
 ]);
 const router = createRouter({ routeTree });
 
@@ -54,21 +58,16 @@ export function App() {
     void supabase.auth.getSession().then(({ data }) => setAuth(data.session));
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuth(session);
-      if (!session) queryClient.clear();
+      if (session) clearSignInExpired();
+      else queryClient.clear();
     });
     return () => data.subscription.unsubscribe();
   }, []);
 
   if (auth === undefined) return null;
-  if (auth === null) return <SignInPage />;
+  if (auth === null) return <SignInPage expired={wasSignInExpired()} />;
   return (
     <QueryClientProvider client={queryClient}>
-      <header className="app-header">
-        <strong>Slop Control</strong>
-        <button type="button" onClick={() => void supabase.auth.signOut()}>
-          Sign out
-        </button>
-      </header>
       <RouterProvider router={router} />
     </QueryClientProvider>
   );

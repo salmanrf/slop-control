@@ -12,7 +12,17 @@ export async function getToken(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
+let signInExpired = false;
+
+/** Tells the sign-in page why the developer landed there, as opposed to signing out. */
+export const wasSignInExpired = () => signInExpired;
+
+export function clearSignInExpired(): void {
+  signInExpired = false;
+}
+
 /** Drops the local sign-in, which sends the app back to the sign-in page. */
 export function handleExpiredSignIn(): void {
+  signInExpired = true;
   void supabase.auth.signOut({ scope: 'local' });
 }

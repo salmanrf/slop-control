@@ -3,7 +3,6 @@ import type { Session } from '@slop-control/shared';
 
 export const keys = {
   workspaces: () => ['workspaces'] as const,
-  workspace: (workspaceId: string) => ['workspaces', workspaceId] as const,
   repos: (workspaceId: string) => ['repos', workspaceId] as const,
   tickets: (workspaceId: string, linkedRepoId: string, search: string, state: string) =>
     ['tickets', workspaceId, linkedRepoId, search, state] as const,
