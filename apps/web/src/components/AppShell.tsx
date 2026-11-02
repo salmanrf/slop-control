@@ -49,7 +49,7 @@ function WorkspaceNav({
   return (
     <nav
       aria-label="Main"
-      className="flex max-w-full flex-[1_1_232px] flex-col gap-1.5 bg-nav px-3.5 py-5 text-nav-text"
+      className="flex max-w-full min-w-0 flex-[1_1_232px] flex-col gap-1.5 bg-nav px-3.5 py-5 text-nav-text"
     >
       <WorkspaceSwitcher workspaceId={workspaceId} />
       <div className="h-3" />
