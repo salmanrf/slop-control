@@ -30,6 +30,7 @@ export interface TestAppOptions {
   dataDir?: string;
   jwt?: AppConfig['jwt'];
   sshConfigFile?: string;
+  heartbeatMs?: number;
 }
 
 export async function signToken(
@@ -54,6 +55,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     githubToken: CANARY_GITHUB_TOKEN,
     githubApiUrl: 'http://127.0.0.1:9',
     sshConfigFile: options.sshConfigFile ?? null,
+    heartbeatMs: options.heartbeatMs ?? 30_000,
     host: '127.0.0.1',
     port: 0,
   };

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Pool, type QueryResult, type QueryResultRow } from 'pg';
 import { AppConfig } from '../config';
 
@@ -10,7 +10,7 @@ export function isUniqueViolation(error: unknown): boolean {
 
 /** The server's only route to Postgres; the browser never talks to it directly. */
 @Injectable()
-export class Database implements OnModuleDestroy {
+export class Database implements OnApplicationShutdown {
   private readonly pool: Pool;
 
   constructor(config: AppConfig) {
@@ -21,7 +21,8 @@ export class Database implements OnModuleDestroy {
     return this.pool.query<Row>(text, values);
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /** Runs after every `onModuleDestroy`, so sessions can still save while shutting down. */
+  async onApplicationShutdown(): Promise<void> {
     await this.pool.end();
   }
 }

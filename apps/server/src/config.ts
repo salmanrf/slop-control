@@ -14,6 +14,8 @@ export class AppConfig {
   githubApiUrl!: string;
   /** Overrides the host's ssh config when resolving aliases; null uses the host's. */
   sshConfigFile!: string | null;
+  /** How often the status stream sends a heartbeat comment. */
+  heartbeatMs!: number;
   host!: string;
   port!: number;
 }
@@ -30,6 +32,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     githubToken: env.GITHUB_TOKEN ?? '',
     githubApiUrl: env.GITHUB_API_URL ?? 'https://api.github.com',
     sshConfigFile: null,
+    heartbeatMs: 30_000,
     host: env.HOST ?? '127.0.0.1',
     port: Number(env.PORT ?? 3000),
   };
