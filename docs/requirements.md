@@ -174,10 +174,10 @@ summary: "Functional and non-functional requirements for Slop Control."
 - **A-5** The developer supplies GitHub and tracker credentials per workspace. *Open:* storage location for these secrets (Supabase vault, OS keychain, env file).
 - **A-6** Built solo, part-time, with flexible MVP scope and no fixed deadline.
 - **A-7** Phase artifacts are written to fixed, phase-configured paths in the worktree so the workspace can detect them (FR-22) and derive actions (FR-28a).
-- **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations.
+- **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations. **Confirmed** by the [S1-04 spike](../spikes/s1-04-headless-resume/).
 - **A-9** Each plan produces one PR (open PR is drafted per plan, from the plan's branch). *If wrong:* a plan may ship as several PRs or several plans may share one.
 
-- **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal.
+- **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal. **Partly confirmed** by the [S1-05 spike](../spikes/s1-05-transcript-usage/): the layout and per-message usage hold, but transcripts leave out the tool's small background model calls, so their totals run slightly below the SDK's.
 - **A-11** Switching off the user-level source (FR-41) removes user-level `CLAUDE.md`, agents, skills, commands, plugins, settings and hooks. It does **not** remove auto memory or claude.ai connectors, which need their own switches (OQ-8).
 
 ## Open questions (plans)
