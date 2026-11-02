@@ -3,9 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "description": "Slop Control — tickets, agents, and AI coding sessions in one place",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks && npm run build -w @slop-control/shared",
+    "dev": "concurrently -n shared,server,web -c gray,blue,green \"npm run dev -w @slop-control/shared\" \"npm run dev -w @slop-control/server\" \"npm run dev -w @slop-control/web\"",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "db:start": "supabase start -x realtime,storage-api,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor,postgres-meta,studio",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
     "start:docs": "(sleep 1 && open http://localhost:1313) & hugo server --source docs-site --port 1313",
     "build:docs": "hugo --source docs-site --destination ../public-docs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "concurrently": "^10.0.6",
+    "eslint": "^9.39.0",
+    "prettier": "^3.6.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1"
   }
 }
