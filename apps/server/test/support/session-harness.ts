@@ -19,22 +19,37 @@ export async function createHarness(options: TestAppOptions = {}): Promise<Harne
   const tracker = new FakeTracker();
   const app = await createTestApp({
     ...options,
-    overrides: [[SessionRuntime, runtime], [TrackerAdapterFactory, tracker], ...(options.overrides ?? [])],
+    overrides: [
+      [SessionRuntime, runtime],
+      [TrackerAdapterFactory, tracker],
+      ...(options.overrides ?? []),
+    ],
   });
   return { ...app, runtime, tracker };
 }
 
-export async function seedWorkspace(h: Harness, name = 'w'): Promise<{ workspaceId: string; clone: string; repoId: string }> {
+export async function seedWorkspace(
+  h: Harness,
+  name = 'w',
+): Promise<{ workspaceId: string; clone: string; repoId: string }> {
   h.tracker.add(ticket(KEY));
   const workspaceId = (await h.api.post('/workspaces').send({ name })).body.id as string;
   const clone = makeClone();
-  const repoId = (await h.api.post(`/workspaces/${workspaceId}/repos`).send({ localPath: clone })).body.id as string;
+  const repoId = (await h.api.post(`/workspaces/${workspaceId}/repos`).send({ localPath: clone }))
+    .body.id as string;
   return { workspaceId, clone, repoId };
 }
 
-export async function startSession(h: Harness, workspaceId: string, phase = 'investigation'): Promise<Session> {
-  const res = await h.api.post(`/workspaces/${workspaceId}/tickets/${ENCODED_KEY}/sessions`).send({ phase });
-  if (res.status !== 201) throw new Error(`start failed: ${res.status} ${JSON.stringify(res.body)}`);
+export async function startSession(
+  h: Harness,
+  workspaceId: string,
+  phase = 'investigation',
+): Promise<Session> {
+  const res = await h.api
+    .post(`/workspaces/${workspaceId}/tickets/${ENCODED_KEY}/sessions`)
+    .send({ phase });
+  if (res.status !== 201)
+    throw new Error(`start failed: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body as Session;
 }
 
@@ -47,7 +62,8 @@ export async function waitForSession(
   const deadline = Date.now() + 5000;
   let last: Session | undefined;
   while (Date.now() < deadline) {
-    last = (await h.api.get(`/workspaces/${session.workspaceId}/sessions/${session.id}`)).body as Session;
+    last = (await h.api.get(`/workspaces/${session.workspaceId}/sessions/${session.id}`))
+      .body as Session;
     if (check(last)) return last;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }

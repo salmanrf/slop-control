@@ -10,9 +10,10 @@ export class Redactor {
   private readonly secrets: string[];
 
   constructor(config: AppConfig) {
-    this.secrets = [config.githubToken, config.jwt.kind === 'secret' ? config.jwt.secret : ''].filter(
-      (secret) => secret.length > 0,
-    );
+    this.secrets = [
+      config.githubToken,
+      config.jwt.kind === 'secret' ? config.jwt.secret : '',
+    ].filter((secret) => secret.length > 0);
   }
 
   redact(text: string): string {

@@ -55,7 +55,8 @@ const ALLOWED_ENV_PREFIXES = ['CLAUDE_', 'ANTHROPIC_'];
 const defaultDeps: ClaudeCodeDeps = {
   claudeCommand: 'claude',
   // The SDK is ESM-only, and this dynamic import stays a real `import()` in the compiled output.
-  loadQuery: async () => (await import('@anthropic-ai/claude-agent-sdk')).query as unknown as SdkQuery,
+  loadQuery: async () =>
+    (await import('@anthropic-ai/claude-agent-sdk')).query as unknown as SdkQuery,
 };
 
 interface AuthStatus {
@@ -63,7 +64,8 @@ interface AuthStatus {
   projectsDirectory: string | null;
 }
 
-type AuthResult = { ok: true; status: AuthStatus } | { ok: false; reason: 'missing' | 'unreadable' };
+type AuthResult =
+  { ok: true; status: AuthStatus } | { ok: false; reason: 'missing' | 'unreadable' };
 
 /** The only code that knows about the Agent SDK (FR-8). Uses the host's Claude Code setup (A-1). */
 @Injectable()
@@ -82,10 +84,16 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     const result = await this.readAuthStatus();
     if (result.ok) {
       if (result.status.loggedIn) return { ready: true };
-      return { ready: false, message: "Claude Code isn't signed in. Run `claude auth login` on the host." };
+      return {
+        ready: false,
+        message: "Claude Code isn't signed in. Run `claude auth login` on the host.",
+      };
     }
     return result.reason === 'missing'
-      ? { ready: false, message: "Claude Code isn't installed on the host. Install it and sign in." }
+      ? {
+          ready: false,
+          message: "Claude Code isn't installed on the host. Install it and sign in.",
+        }
       : { ready: false, message: "Claude Code's sign-in status couldn't be read on the host." };
   }
 
@@ -191,7 +199,10 @@ export class ClaudeCodeRuntime extends SessionRuntime {
           }
           // Signed out exits 1 and still prints its JSON, so the output decides.
           try {
-            const parsed = JSON.parse(stdout) as { loggedIn?: unknown; projectsDirectory?: unknown };
+            const parsed = JSON.parse(stdout) as {
+              loggedIn?: unknown;
+              projectsDirectory?: unknown;
+            };
             if (typeof parsed.loggedIn !== 'boolean') throw new Error('No loggedIn field.');
             resolve({
               ok: true,
@@ -214,7 +225,8 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     const env: Record<string, string> = {};
     for (const [name, value] of Object.entries(process.env)) {
       if (value === undefined) continue;
-      const allowed = ALLOWED_ENV.has(name) || ALLOWED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+      const allowed =
+        ALLOWED_ENV.has(name) || ALLOWED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
       const holdsSecret = this.config.githubToken !== '' && value.includes(this.config.githubToken);
       if (allowed && !holdsSecret) env[name] = value;
     }
@@ -236,7 +248,11 @@ function endedFromResult(message: SdkMessage): RuntimeEvent {
 }
 
 /** See the S1-05 note for this undocumented layout. */
-function transcriptPath(projectsDirectory: string | null, cwd: string, sessionId: string): string | null {
+function transcriptPath(
+  projectsDirectory: string | null,
+  cwd: string,
+  sessionId: string,
+): string | null {
   if (!projectsDirectory) return null;
   let realCwd = cwd;
   try {

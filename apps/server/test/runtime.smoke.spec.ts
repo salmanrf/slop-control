@@ -42,7 +42,8 @@ describeSmoke('ClaudeCodeRuntime smoke test', () => {
     const cwd = makeClone();
     const events = await collect(
       runtime.start({
-        brief: 'Remember the word PLUM-42. Write the single line "hello" to `.slop/investigation.md`.',
+        brief:
+          'Remember the word PLUM-42. Write the single line "hello" to `.slop/investigation.md`.',
         cwd,
         setup: { permissionMode: 'auto' },
       }),

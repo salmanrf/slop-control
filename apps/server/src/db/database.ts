@@ -17,7 +17,10 @@ export class Database implements OnApplicationShutdown {
     this.pool = new Pool({ connectionString: config.databaseUrl });
   }
 
-  query<Row extends QueryResultRow>(text: string, values: unknown[] = []): Promise<QueryResult<Row>> {
+  query<Row extends QueryResultRow>(
+    text: string,
+    values: unknown[] = [],
+  ): Promise<QueryResult<Row>> {
     return this.pool.query<Row>(text, values);
   }
 

@@ -2,7 +2,14 @@ import { existsSync } from 'node:fs';
 import { git } from './support/git';
 import { TrackerAuthError, TrackerUnavailableError } from '../src/tickets/tracker';
 import { resetDatabase } from './support/test-app';
-import { createHarness, ENCODED_KEY, KEY, seedWorkspace, startSession, type Harness } from './support/session-harness';
+import {
+  createHarness,
+  ENCODED_KEY,
+  KEY,
+  seedWorkspace,
+  startSession,
+  type Harness,
+} from './support/session-harness';
 
 describe('starting a session', () => {
   let h: Harness;
@@ -11,7 +18,8 @@ describe('starting a session', () => {
 
   const post = (body: object, ws = workspaceId, key = ENCODED_KEY) =>
     h.api.post(`/workspaces/${ws}/tickets/${key}/sessions`).send(body);
-  const history = async () => (await h.api.get(`/workspaces/${workspaceId}/tickets/${ENCODED_KEY}/sessions`)).body;
+  const history = async () =>
+    (await h.api.get(`/workspaces/${workspaceId}/tickets/${ENCODED_KEY}/sessions`)).body;
 
   beforeAll(async () => {
     h = await createHarness();
@@ -91,9 +99,17 @@ describe('starting a session', () => {
   });
 
   it('returns 404 for an unknown workspace, a missing ticket, or a key with no linked repo', async () => {
-    expect((await post({ phase: 'investigation' }, '00000000-0000-4000-8000-000000000000')).status).toBe(404);
-    expect((await post({ phase: 'investigation' }, workspaceId, encodeURIComponent('acme/widgets#99'))).status).toBe(404);
-    expect((await post({ phase: 'investigation' }, workspaceId, encodeURIComponent('other/repo#1'))).status).toBe(404);
+    expect(
+      (await post({ phase: 'investigation' }, '00000000-0000-4000-8000-000000000000')).status,
+    ).toBe(404);
+    expect(
+      (await post({ phase: 'investigation' }, workspaceId, encodeURIComponent('acme/widgets#99')))
+        .status,
+    ).toBe(404);
+    expect(
+      (await post({ phase: 'investigation' }, workspaceId, encodeURIComponent('other/repo#1')))
+        .status,
+    ).toBe(404);
     expect(await history()).toEqual([]);
   });
 
@@ -110,7 +126,10 @@ describe('starting a session', () => {
   });
 
   it('fails with the runtime message when it is not ready, creating no session or worktree', async () => {
-    h.runtime.readiness = { ready: false, message: "Claude Code isn't signed in. Run `claude auth login`." };
+    h.runtime.readiness = {
+      ready: false,
+      message: "Claude Code isn't signed in. Run `claude auth login`.",
+    };
     const res = await post({ phase: 'investigation' });
     expect(res.status).toBe(503);
     expect(res.body).toEqual({
@@ -128,7 +147,6 @@ describe('starting a session', () => {
     expect(res.body.code).toBe('WORKTREE_CREATE_FAILED');
     expect(await history()).toEqual([]);
   });
-
 });
 
 describe('workspace isolation', () => {

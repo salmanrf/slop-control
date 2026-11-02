@@ -57,7 +57,11 @@ export class WorkspacesService {
       return await this.get(rows[0]!.id);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new ApiException(409, 'WORKSPACE_NAME_TAKEN', `A workspace named "${trimmed}" already exists.`);
+        throw new ApiException(
+          409,
+          'WORKSPACE_NAME_TAKEN',
+          `A workspace named "${trimmed}" already exists.`,
+        );
       }
       throw error;
     }
@@ -65,7 +69,9 @@ export class WorkspacesService {
 
   async get(workspaceId: string): Promise<Workspace> {
     if (!isUuid(workspaceId)) throw notFound('Workspace not found.');
-    const { rows } = await this.db.query<WorkspaceRow>(`${SELECT_WORKSPACE} where w.id = $1`, [workspaceId]);
+    const { rows } = await this.db.query<WorkspaceRow>(`${SELECT_WORKSPACE} where w.id = $1`, [
+      workspaceId,
+    ]);
     if (!rows[0]) throw notFound('Workspace not found.');
     return toWorkspace(rows[0]);
   }
@@ -101,7 +107,11 @@ export class WorkspacesService {
       return toLinkedRepo(rows[0]!);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new ApiException(409, 'REPO_ALREADY_LINKED', `${clone.localPath} is already linked to this workspace.`);
+        throw new ApiException(
+          409,
+          'REPO_ALREADY_LINKED',
+          `${clone.localPath} is already linked to this workspace.`,
+        );
       }
       throw error;
     }

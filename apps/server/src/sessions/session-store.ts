@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import type { ArtifactStatus, Phase, Session, SessionArtifact, SessionStatus } from '@slop-control/shared';
+import type {
+  ArtifactStatus,
+  Phase,
+  Session,
+  SessionArtifact,
+  SessionStatus,
+} from '@slop-control/shared';
 import { Database } from '../db/database';
 
 interface SessionRow {
@@ -124,7 +130,12 @@ export class SessionStore {
     return toSession(rows[0]!);
   }
 
-  async saveArtifact(sessionId: string, round: number, path: string, markdown: string): Promise<void> {
+  async saveArtifact(
+    sessionId: string,
+    round: number,
+    path: string,
+    markdown: string,
+  ): Promise<void> {
     await this.db.query(
       `insert into session_artifact (session_id, round, path, markdown) values ($1, $2, $3, $4)
        on conflict (session_id, round) do nothing`,

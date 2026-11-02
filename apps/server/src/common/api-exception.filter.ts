@@ -33,9 +33,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    const detail = exception instanceof Error ? (exception.stack ?? exception.message) : `${exception}`;
+    const detail =
+      exception instanceof Error ? (exception.stack ?? exception.message) : `${exception}`;
     this.logger.error(this.redactor.redact(detail));
-    const body: ApiError = { code: 'INTERNAL_ERROR', message: 'Something went wrong on the server.' };
+    const body: ApiError = {
+      code: 'INTERNAL_ERROR',
+      message: 'Something went wrong on the server.',
+    };
     response.status(500).json(body);
   }
 }

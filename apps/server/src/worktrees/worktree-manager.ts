@@ -45,7 +45,17 @@ export class GitWorktreeManager extends WorktreeManager {
     try {
       await mkdir(dirname(path), { recursive: true });
       await excludeSlopFolder(input.repoPath);
-      await git(input.repoPath, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, path, input.baseRef);
+      await git(
+        input.repoPath,
+        'worktree',
+        'add',
+        '--quiet',
+        '--no-track',
+        '-b',
+        branch,
+        path,
+        input.baseRef,
+      );
     } catch (error) {
       throw new WorktreeCreateError(`git couldn't create the worktree: ${describe(error)}`);
     }

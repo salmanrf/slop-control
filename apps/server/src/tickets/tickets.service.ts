@@ -17,7 +17,11 @@ export class TicketsService {
     private readonly trackers: TrackerAdapterFactory,
   ) {}
 
-  async list(workspaceId: string, linkedRepoId: string | undefined, query: TicketQuery): Promise<TicketPage> {
+  async list(
+    workspaceId: string,
+    linkedRepoId: string | undefined,
+    query: TicketQuery,
+  ): Promise<TicketPage> {
     await this.workspaces.get(workspaceId);
     if (!linkedRepoId) throw notFound('Linked repo not found.');
     const repo = await this.workspaces.getRepo(workspaceId, linkedRepoId);

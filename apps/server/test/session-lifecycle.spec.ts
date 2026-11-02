@@ -97,7 +97,9 @@ describe('session lifecycle', () => {
       const ended = await waitForSession(h, session, (s) => s.status === 'ended');
       expect(ended.resumeCommand).toBe(`cd ${session.worktreePath} && claude --resume abc-123`);
 
-      const removed = await h.api.delete(`/workspaces/${workspaceId}/sessions/${session.id}/worktree`);
+      const removed = await h.api.delete(
+        `/workspaces/${workspaceId}/sessions/${session.id}/worktree`,
+      );
       expect(removed.body.resumeCommand).toBeNull();
     });
 
@@ -162,7 +164,11 @@ describe('session lifecycle', () => {
         'holding a NUL byte, which Postgres text cannot store',
         (s: Session) => writeArtifact(s, '.slop/investigation.md', 'a\u0000b'),
       ],
-      ['a directory', (s: Session) => mkdirSync(join(s.worktreePath, '.slop/investigation.md'), { recursive: true })],
+      [
+        'a directory',
+        (s: Session) =>
+          mkdirSync(join(s.worktreePath, '.slop/investigation.md'), { recursive: true }),
+      ],
     ])('is incomplete when the artifact is %s, with nothing stored', async (_name, arrange) => {
       const session = await startSession(h, workspaceId);
       arrange(session);
@@ -308,7 +314,10 @@ describe('session lifecycle', () => {
       expect(refused.status).toBe(409);
       expect(refused.body.code).toBe('WORKTREE_DIRTY');
       expect(existsSync(session.worktreePath)).toBe(true);
-      expect((await h.api.get(`/workspaces/${workspaceId}/sessions/${session.id}`)).body.worktreeRemovedAt).toBeNull();
+      expect(
+        (await h.api.get(`/workspaces/${workspaceId}/sessions/${session.id}`)).body
+          .worktreeRemovedAt,
+      ).toBeNull();
 
       const forced = await remove(session, '?force=true');
       expect(forced.status).toBe(200);
@@ -398,8 +407,16 @@ describe('credentials (NFR-4)', () => {
   afterAll(() => h.close());
 
   it.each([
-    ['a reported error', (run: Harness['runtime']['lastRun']) => run.ended('error', `bad token ${CANARY_GITHUB_TOKEN}`)],
-    ['a thrown error', (run: Harness['runtime']['lastRun']) => run.fail(new Error(`bad token ${CANARY_GITHUB_TOKEN}`))],
+    [
+      'a reported error',
+      (run: Harness['runtime']['lastRun']) =>
+        run.ended('error', `bad token ${CANARY_GITHUB_TOKEN}`),
+    ],
+    [
+      'a thrown error',
+      (run: Harness['runtime']['lastRun']) =>
+        run.fail(new Error(`bad token ${CANARY_GITHUB_TOKEN}`)),
+    ],
   ])('redacts the token from %s, in the record and in logs', async (_name, act) => {
     const session = await startSession(h, workspaceId);
     act(h.runtime.lastRun);

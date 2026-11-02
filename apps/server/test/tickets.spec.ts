@@ -1,4 +1,8 @@
-import { TrackerAdapterFactory, TrackerAuthError, TrackerUnavailableError } from '../src/tickets/tracker';
+import {
+  TrackerAdapterFactory,
+  TrackerAuthError,
+  TrackerUnavailableError,
+} from '../src/tickets/tracker';
 import { FakeTracker, ticket } from './support/fake-tracker';
 import { makeClone } from './support/git';
 import { createTestApp, resetDatabase, type TestApp } from './support/test-app';
@@ -23,7 +27,8 @@ describe('tickets', () => {
     tracker.failure = null;
     tracker.add(ticket(KEY));
     workspaceId = (await t.api.post('/workspaces').send({ name: 'w' })).body.id;
-    repoId = (await t.api.post(`/workspaces/${workspaceId}/repos`).send({ localPath: makeClone() })).body.id;
+    repoId = (await t.api.post(`/workspaces/${workspaceId}/repos`).send({ localPath: makeClone() }))
+      .body.id;
   });
   afterAll(() => t.close());
 
@@ -60,14 +65,18 @@ describe('tickets', () => {
   });
 
   it('returns 404 for a missing ticket', async () => {
-    const res = await t.api.get(`/workspaces/${workspaceId}/tickets/${encodeURIComponent('acme/widgets#99')}`);
+    const res = await t.api.get(
+      `/workspaces/${workspaceId}/tickets/${encodeURIComponent('acme/widgets#99')}`,
+    );
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('NOT_FOUND');
   });
 
   it('returns 404 for a key that matches no linked repo', async () => {
     tracker.add(ticket('other/repo#1'));
-    const res = await t.api.get(`/workspaces/${workspaceId}/tickets/${encodeURIComponent('other/repo#1')}`);
+    const res = await t.api.get(
+      `/workspaces/${workspaceId}/tickets/${encodeURIComponent('other/repo#1')}`,
+    );
     expect(res.status).toBe(404);
   });
 

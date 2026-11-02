@@ -82,9 +82,16 @@ export class CloneInspector {
 }
 
 function parseRemote(url: string): ParsedRemote | null {
-  const standard = /^(https|ssh):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
+  const standard =
+    /^(https|ssh):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
   if (standard) {
-    const [, scheme, host, owner, repo] = standard as unknown as [string, string, string, string, string];
+    const [, scheme, host, owner, repo] = standard as unknown as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
     return { transport: scheme === 'https' ? 'https' : 'ssh', host, owner, repo };
   }
   const scpLike = /^(?:[^@/]+@)?([^/:]+):([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
@@ -99,7 +106,13 @@ async function detectDefaultBranch(root: string): Promise<string> {
   const head = await gitOutput(root, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
   if (head?.startsWith('origin/')) return head.slice('origin/'.length);
   for (const branch of ['main', 'master']) {
-    const ref = await gitOutput(root, 'rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`);
+    const ref = await gitOutput(
+      root,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/remotes/origin/${branch}`,
+    );
     if (ref !== null) return branch;
   }
   return 'main';

@@ -170,7 +170,9 @@ function encodeCursor(page: number): string {
 function decodeCursor(cursor: string | undefined): number {
   if (!cursor) return 1;
   try {
-    const { page } = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { page: unknown };
+    const { page } = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      page: unknown;
+    };
     return typeof page === 'number' && Number.isInteger(page) && page > 0 ? page : 1;
   } catch {
     return 1;

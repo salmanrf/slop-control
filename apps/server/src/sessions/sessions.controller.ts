@@ -32,13 +32,19 @@ export class SessionsController {
 
   /** A plain route rather than `@Sse`, which can't send the heartbeat comments the contract asks for. */
   @Get('session-updates')
-  async streamUpdates(@Param('workspaceId') workspaceId: string, @Res() response: Response): Promise<void> {
+  async streamUpdates(
+    @Param('workspaceId') workspaceId: string,
+    @Res() response: Response,
+  ): Promise<void> {
     await this.workspaces.get(workspaceId);
     this.updates.attach(workspaceId, response);
   }
 
   @Get('sessions/:sessionId')
-  get(@Param('workspaceId') workspaceId: string, @Param('sessionId') sessionId: string): Promise<Session> {
+  get(
+    @Param('workspaceId') workspaceId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<Session> {
     return this.sessions.get(workspaceId, sessionId);
   }
 
@@ -52,7 +58,10 @@ export class SessionsController {
 
   @Post('sessions/:sessionId/stop')
   @HttpCode(200)
-  stop(@Param('workspaceId') workspaceId: string, @Param('sessionId') sessionId: string): Promise<Session> {
+  stop(
+    @Param('workspaceId') workspaceId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<Session> {
     return this.sessions.stop(workspaceId, sessionId);
   }
 

@@ -20,11 +20,18 @@ export class TicketsController {
     if (typeof search === 'string' && search) query.search = search;
     if (STATES.includes(state)) query.state = state as TicketQuery['state'];
     if (typeof cursor === 'string' && cursor) query.cursor = cursor;
-    return this.tickets.list(workspaceId, typeof linkedRepoId === 'string' ? linkedRepoId : undefined, query);
+    return this.tickets.list(
+      workspaceId,
+      typeof linkedRepoId === 'string' ? linkedRepoId : undefined,
+      query,
+    );
   }
 
   @Get(':ticketKey')
-  get(@Param('workspaceId') workspaceId: string, @Param('ticketKey') ticketKey: string): Promise<Ticket> {
+  get(
+    @Param('workspaceId') workspaceId: string,
+    @Param('ticketKey') ticketKey: string,
+  ): Promise<Ticket> {
     return this.tickets.get(workspaceId, ticketKey);
   }
 }

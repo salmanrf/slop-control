@@ -18,7 +18,13 @@ describeRuntimeContract('fake', () => ({
 }));
 
 const INIT = { type: 'system', subtype: 'init', session_id: 'sdk-1', permissionMode: 'auto' };
-const SUCCESS = { type: 'result', subtype: 'success', is_error: false, session_id: 'sdk-1', result: 'done' };
+const SUCCESS = {
+  type: 'result',
+  subtype: 'success',
+  is_error: false,
+  session_id: 'sdk-1',
+  result: 'done',
+};
 
 /** Stands in for the Agent SDK's `query`, at the system boundary. */
 class ScriptedSdk {
@@ -40,10 +46,10 @@ class ScriptedSdk {
       this.push(new Error('Claude Code process aborted by user'));
     });
     const queue = this.queue;
-    const self = this;
+    const waitForItem = () => new Promise<void>((resolve) => (this.wake = resolve));
     return (async function* () {
       while (true) {
-        while (queue.length === 0) await new Promise<void>((resolve) => (self.wake = resolve));
+        while (queue.length === 0) await waitForItem();
         const item = queue.shift()!;
         if (item === 'close') return;
         if (item instanceof Error) throw item;
@@ -98,7 +104,10 @@ describe('ClaudeCodeRuntime', () => {
     it('says to sign in when signed out, as with exit code 1', async () => {
       const claude = fakeClaude(`echo '{"loggedIn":false}'; exit 1`);
       const result = await makeRuntime(new ScriptedSdk(), claude).checkReady();
-      expect(result).toEqual({ ready: false, message: expect.stringContaining('claude auth login') });
+      expect(result).toEqual({
+        ready: false,
+        message: expect.stringContaining('claude auth login'),
+      });
     });
 
     it('says to install Claude Code when the command is missing', async () => {
@@ -112,11 +121,16 @@ describe('ClaudeCodeRuntime', () => {
       ['JSON without the field', `echo '{}'`],
     ])('says the status could not be read after %s', async (_name, script) => {
       const result = await makeRuntime(new ScriptedSdk(), fakeClaude(script)).checkReady();
-      expect(result).toEqual({ ready: false, message: expect.stringContaining("couldn't be read") });
+      expect(result).toEqual({
+        ready: false,
+        message: expect.stringContaining("couldn't be read"),
+      });
     });
 
     it('never repeats account details in its message', async () => {
-      const claude = fakeClaude(`echo '{"loggedIn":false,"email":"person@example.invalid"}'; exit 1`);
+      const claude = fakeClaude(
+        `echo '{"loggedIn":false,"email":"person@example.invalid"}'; exit 1`,
+      );
       const result = await makeRuntime(new ScriptedSdk(), claude).checkReady();
       expect(JSON.stringify(result)).not.toContain('person@example.invalid');
     });
@@ -207,7 +221,12 @@ describe('ClaudeCodeRuntime', () => {
     it('does not fail a session for a denied call', async () => {
       const sdk = new ScriptedSdk();
       const handle = makeRuntime(sdk).start(INPUT);
-      sdk.push(INIT, { type: 'system', subtype: 'permission_denied', tool_name: 'Bash' }, SUCCESS, 'close');
+      sdk.push(
+        INIT,
+        { type: 'system', subtype: 'permission_denied', tool_name: 'Bash' },
+        SUCCESS,
+        'close',
+      );
       expect((await collect(handle)).at(-1)).toMatchObject({ outcome: 'success' });
     });
 
@@ -222,10 +241,10 @@ describe('ClaudeCodeRuntime', () => {
   describe('falling back from auto mode', () => {
     it.each([
       ['init', [{ ...INIT, permissionMode: 'default' }]],
-      ['a later status message, the one that really changes (S1-04)', [
-        INIT,
-        { type: 'system', subtype: 'status', status: null, permissionMode: 'default' },
-      ]],
+      [
+        'a later status message, the one that really changes (S1-04)',
+        [INIT, { type: 'system', subtype: 'status', status: null, permissionMode: 'default' }],
+      ],
     ])('ends with an error when %s reports another mode', async (_name, messages) => {
       const sdk = new ScriptedSdk();
       const handle = makeRuntime(sdk).start(INPUT);
@@ -250,7 +269,12 @@ describe('ClaudeCodeRuntime', () => {
     it('accepts a status message that stays in auto mode', async () => {
       const sdk = new ScriptedSdk();
       const handle = makeRuntime(sdk).start(INPUT);
-      sdk.push(INIT, { type: 'system', subtype: 'status', status: null, permissionMode: 'auto' }, SUCCESS, 'close');
+      sdk.push(
+        INIT,
+        { type: 'system', subtype: 'status', status: null, permissionMode: 'auto' },
+        SUCCESS,
+        'close',
+      );
       expect((await collect(handle)).at(-1)).toMatchObject({ outcome: 'success' });
     });
   });
@@ -267,7 +291,11 @@ describe('ClaudeCodeRuntime', () => {
       sdk.push(INIT, SUCCESS, 'close');
       await collect(handle);
       expect(sdk.prompt).toBe('Now fix it.');
-      expect(sdk.options).toMatchObject({ resume: 'sdk-1', cwd: process.cwd(), permissionMode: 'auto' });
+      expect(sdk.options).toMatchObject({
+        resume: 'sdk-1',
+        cwd: process.cwd(),
+        permissionMode: 'auto',
+      });
     });
   });
 

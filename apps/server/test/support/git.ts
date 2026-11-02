@@ -25,7 +25,11 @@ export function tempDir(prefix = 'slop-test-'): string {
 export function makeClone(
   options: { origin?: string | null; defaultBranch?: string; setOriginHead?: boolean } = {},
 ): string {
-  const { origin = 'git@github.com:acme/widgets.git', defaultBranch = 'main', setOriginHead = true } = options;
+  const {
+    origin = 'git@github.com:acme/widgets.git',
+    defaultBranch = 'main',
+    setOriginHead = true,
+  } = options;
   const dir = tempDir('slop-clone-');
   git(dir, 'init', '-q', '-b', defaultBranch);
   writeFileSync(join(dir, 'README.md'), '# widgets\n');

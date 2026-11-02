@@ -20,7 +20,8 @@ const FIRST_ROUND = 1;
 const SHUTDOWN_GRACE_MS = 2000;
 const STREAM_CLOSED_REASON = 'The runtime closed its event stream before the session ended.';
 
-const isActive = (session: Session) => session.status === 'starting' || session.status === 'running';
+const isActive = (session: Session) =>
+  session.status === 'starting' || session.status === 'running';
 
 @Injectable()
 export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -125,7 +126,11 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
     const session = await this.get(workspaceId, sessionId);
     if (session.worktreeRemovedAt) return session;
     if (isActive(session)) {
-      throw new ApiException(409, 'SESSION_ACTIVE', 'Stop the session before removing its worktree.');
+      throw new ApiException(
+        409,
+        'SESSION_ACTIVE',
+        'Stop the session before removing its worktree.',
+      );
     }
 
     const repo = await this.workspaces.getRepo(workspaceId, session.linkedRepoId);
@@ -191,7 +196,11 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
 
   private async apply(session: Session, event: RuntimeEvent): Promise<void> {
     if (event.type === 'session_started') {
-      const running = await this.store.markRunning(session.id, event.runtimeSessionId, event.transcriptPath);
+      const running = await this.store.markRunning(
+        session.id,
+        event.runtimeSessionId,
+        event.transcriptPath,
+      );
       if (running) this.updates.publish(running);
       return;
     }
@@ -201,7 +210,11 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /** Stores the artifact first, then the final status, and publishes last. */
-  private async finish(session: Session, status: SessionEnd['status'], reason: string | null): Promise<void> {
+  private async finish(
+    session: Session,
+    status: SessionEnd['status'],
+    reason: string | null,
+  ): Promise<void> {
     const redactedReason = reason === null ? null : this.redactor.redact(reason);
     if (status === 'failed') this.logger.warn(`Session ${session.id} failed: ${redactedReason}`);
 

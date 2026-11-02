@@ -50,7 +50,10 @@ export function describeRuntimeContract(name: string, makeDriver: () => Contract
       await handle.stop();
       await handle.stop();
 
-      expect((await iterator.next()).value).toMatchObject({ type: 'session_ended', outcome: 'stopped' });
+      expect((await iterator.next()).value).toMatchObject({
+        type: 'session_ended',
+        outcome: 'stopped',
+      });
       expect((await iterator.next()).done).toBe(true);
     });
 

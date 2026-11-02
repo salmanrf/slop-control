@@ -123,9 +123,12 @@ describe('session status stream', () => {
   });
 
   it('returns 404 for an unknown workspace', async () => {
-    const res = await fetch(`${baseUrl}/workspaces/00000000-0000-4000-8000-000000000000/session-updates`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(
+      `${baseUrl}/workspaces/00000000-0000-4000-8000-000000000000/session-updates`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+      },
+    );
     expect(res.status).toBe(404);
     expect(((await res.json()) as { code: string }).code).toBe('NOT_FOUND');
   });
@@ -144,7 +147,11 @@ describe('session status stream', () => {
     expect(await client.next()).toMatchObject({ id: session.id, status: 'starting' });
 
     h.runtime.lastRun.started('abc');
-    expect(await client.next()).toMatchObject({ id: session.id, status: 'running', runtimeSessionId: 'abc' });
+    expect(await client.next()).toMatchObject({
+      id: session.id,
+      status: 'running',
+      runtimeSessionId: 'abc',
+    });
 
     h.runtime.lastRun.ended('success');
     const ended = await client.next();

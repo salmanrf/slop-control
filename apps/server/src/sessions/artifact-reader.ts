@@ -6,7 +6,10 @@ import { join } from 'node:path';
  * Only a non-empty, valid UTF-8 regular file inside the worktree counts: following a symlink,
  * in the file or in any folder on the way to it, could serve a file from elsewhere on the host.
  */
-export async function readArtifact(worktreePath: string, relativePath: string): Promise<string | null> {
+export async function readArtifact(
+  worktreePath: string,
+  relativePath: string,
+): Promise<string | null> {
   try {
     const expected = join(await realpath(worktreePath), relativePath);
     if ((await realpath(expected)) !== expected) return null;
