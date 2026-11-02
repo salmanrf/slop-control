@@ -9,6 +9,19 @@ describe('Markdown', () => {
     expect(screen.getByText('cause').tagName).toBe('STRONG');
   });
 
+  it('renders a table', () => {
+    render(<Markdown source={'| Option | Verdict |\n| --- | --- |\n| Close | Recommended |'} />);
+    expect(screen.getByRole('columnheader', { name: 'Option' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Recommended' })).toBeInTheDocument();
+  });
+
+  it('does not create elements from raw HTML inside a table', () => {
+    const { container } = render(
+      <Markdown source={'| A |\n| --- |\n| <img src="x" onerror="alert(1)"> |'} />,
+    );
+    expect(container.querySelector('img')).toBeNull();
+  });
+
   it('does not create elements from raw HTML in agent output', () => {
     const { container } = render(
       <Markdown

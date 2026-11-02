@@ -138,6 +138,10 @@
   text-align: left;
 }
 
+.markdown th {
+  font-weight: 600;
+}
+
 .markdown hr {
   border-color: var(--color-line);
 }
