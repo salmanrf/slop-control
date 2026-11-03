@@ -8,29 +8,38 @@ summary: "Functional and non-functional requirements for Slop Control."
 ## Workspaces & linked sources
 
 - **FR-1** The app must open with a workspace selector and must not allow sessions until a workspace exists.
-- **FR-2** A workspace must have at least one linked GitHub repository; ticket tracker, Slack channels, and wiki must be optional.
+- **FR-2** A workspace must have at least one linked GitHub repository and may link several; ticket sources (FR-6a), Slack channels, and wiki must be optional.
 - **FR-3** Each workspace must keep its own linked sources, agent/skill configuration, project knowledge, and session history, isolated from other workspaces.
 
-## Tickets (adapter only)
+## Tickets & ticket sources
 
-- **FR-4** The workspace must not store tickets as its own source of truth; it must read and write tickets through a tracker adapter.
-- **FR-5** The MVP must ship adapters for **Jira** and **GitHub Issues**.
-- **FR-6** The adapter must support: list/search tickets, read ticket details, add a comment, and transition status (the latter two only via approved drafted actions, see FR-27).
+- **FR-4** The workspace must read and write every ticket through a tracker adapter. Tickets from a connected source must not be stored as rows: that tracker stays their source of truth. Only the built-in tracker (FR-6e) stores tickets, and the workspace is their source of truth.
+- **FR-5** The MVP must ship adapters for **Jira**, **GitHub Issues**, and the **built-in tracker**.
+- **FR-6** Every adapter must support: list/search tickets, read ticket details, add a comment, and transition status (the latter two only via approved drafted actions, see FR-27).
+- **FR-6a** A workspace must be able to connect **zero or more ticket sources**, in any mix and including several of one type. A ticket source is one scope in one tracker: a Jira project or one repository's GitHub Issues.
+- **FR-6b** Connecting a ticket source must be a separate step from linking a repository. Linking a repository must not connect its GitHub Issues, though the linking flow may offer to. A GitHub Issues source need not be a linked repository. Each source has its own credentials (A-5).
+- **FR-6c** The ticket view must list and search the tickets of all the workspace's sources together, show each ticket's source, and allow filtering by source. A source that fails must show its own error (auth or unreachable) while the other sources' tickets still list.
+- **FR-6d** A ticket must be identified by its source and its key, since keys are only unique within a source. Sessions, plans, annotations, and drafted actions must record both, and ticket comments and status transitions must be dispatched to the ticket's own source.
+- **FR-6e** Every workspace must have a **built-in tracker** that needs no setup. While a workspace has no connected source, the built-in tracker is its only ticket source, and the developer can create tickets in the dashboard. A built-in ticket has a title, a markdown body, comments, a per-workspace key (e.g. `T-12`), and one of the fixed statuses *To do*, *In progress*, *In review*, *Done*, or *Cancelled*.
+- **FR-6f** The developer may edit built-in tickets directly in the dashboard. Sessions may not: they change a built-in ticket only through approved drafted actions, as with any other source (FR-27).
+- **FR-6g** When a workspace connects its first source, its built-in tickets must stay listed and workable, with their sessions and plans, but creating new built-in tickets must be turned off. They are not moved to the connected tracker. Disconnecting the last source turns creation back on.
+- **FR-6h** Disconnecting a source must keep the sessions, plans, and artifacts of its tickets. Those tickets show as *source disconnected*, with the brief stored on each session as their remaining context, and new sessions cannot start on them.
 
 ## Sessions
 
 - **FR-7** Sessions must be launched by the workspace; only workspace-launched sessions are tracked in the MVP (importing manually started sessions is out of scope).
 - **FR-8** The MVP must support **Claude Code** as the only session runtime, behind a runtime interface that allows other tools later.
 - **FR-9** Sessions must run headless (Claude Agent SDK / `claude -p` style), and their status must update live in the dashboard without polling. Live streaming of agent output is not required.
-- **FR-10** Each session must record: ticket, plan (if any, see FR-10b), phase, agent/skill setup used, working copy (worktree) path, start/end time, status, transcript, and a summary of findings/decisions.
-- **FR-11** A **ticket-level session** (no plan) must run in its own git worktree of the linked repository, created by the workspace. A session that belongs to a plan must run in that **plan's worktree** (FR-10d).
+- **FR-10** Each session must record: ticket and its source (FR-6d), plan (if any, see FR-10b), phase, repository, agent/skill setup used, working copy (worktree) path, start/end time, status, transcript, and a summary of findings/decisions.
+- **FR-11** A **ticket-level session** (no plan) must run in its own git worktree of the linked repository chosen for it (FR-11a), created by the workspace. A session that belongs to a plan must run in that **plan's worktree** (FR-10d).
+- **FR-11a** A ticket must not determine its repository, since a Jira or built-in ticket names none. A session runs in exactly one linked repository, shown and changeable before launch (FR-18). The workspace must preselect the workspace's only repository, or the repository of a GitHub Issues ticket when that repository is linked; otherwise the developer must choose. The repository of a session on a plan is the plan's and cannot be changed.
 
 ## Plans
 
 - **FR-10a** A ticket must be able to have zero or more **plans**. Each plan is a separately shippable part of the ticket. Splitting a ticket into several plans is optional.
 - **FR-10b** Every session must link to exactly one ticket and may also link to one plan of that ticket. Sessions in any phase may be ticket-level (no plan).
 - **FR-10c** A planning session is linked to the ticket, and its plan document may define one or more plans, each made of **plan items**. The workspace must create a plan record for each one.
-- **FR-10d** Each plan must own one branch and one worktree. All sessions linked to the plan share them, and only one session may run on a plan at a time.
+- **FR-10d** Each plan must target one linked repository and own one branch and one worktree in it. All sessions linked to the plan share them, and only one session may run on a plan at a time. A ticket whose work spans several repositories gets one plan per repository.
 - **FR-10e** A plan is always **revised**, never replaced. Changes go through correction rounds (FR-35) of the planning session that defined it.
 - **FR-10f** The ticket view must show the ticket's plans, each plan's plan items and sessions, and the ticket-level sessions.
 
@@ -45,7 +54,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 - **FR-15** Sessions must run in Claude Code's **auto** permission mode by default; safety comes from the phase's pre-defined scope and stop condition, not from per-step prompts.
 - **FR-16** A session must stop when its phase's stop condition is reached and must not continue into the next phase on its own; moving to the next phase is a separate session started by the user.
 - **FR-17** The orchestrator must suggest the next phase for a ticket (default order: investigation → planning → implementation → automated testing → e2e testing → code review), and the user must be able to start any phase in any order, any number of times.
-- **FR-18** Before launch, the user must see the resolved setup (agents, sub-agents, skills, MCP servers) and may adjust it for that session.
+- **FR-18** Before launch, the user must see the resolved repository (FR-11a) and setup (agents, sub-agents, skills, MCP servers) and may adjust them for that session.
 
 ## Agents & skills manager
 
@@ -153,7 +162,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 ## Data
 
-- **NFR-7** Workspaces, sessions, project knowledge, phase setups, and drafted actions must be stored in **Supabase Postgres** (local Supabase or cloud); agent/skill files live in the app directory (FR-19).
+- **NFR-7** Workspaces, ticket source settings, built-in tickets, sessions, project knowledge, phase setups, and drafted actions must be stored in **Supabase Postgres** (local Supabase or cloud); agent/skill files live in the app directory (FR-19).
 
 ## Out of scope for MVP
 
@@ -161,6 +170,9 @@ summary: "Functional and non-functional requirements for Slop Control."
 - Bug investigator with prod-like data replication.
 - AI coding runtimes other than Claude Code.
 - Importing sessions not launched by the workspace.
+- Built-in tracker features beyond FR-6e and FR-6f, such as boards, assignees, sprints, custom statuses, and attachments.
+- Moving tickets between sources.
+- A session working across several repositories at once.
 - Switches for ambient sources other than the user-level source (project, plugins) and for individual ambient items (skills, sub-agents, `CLAUDE.md` files). These move to Later if baseline context (FR-46) shows they matter.
 - Token budgets and alerts.
 - Automatic browser driving for frontend flows; MVP recordings (FR-52a) come from whatever the session itself runs, such as a headless browser the test strategy already uses or a terminal recorder.
@@ -178,7 +190,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 ## Unconfirmed (to revisit)
 
 - **A-4** Repositories are cloned by the developer, and the workspace points at local clones to create worktrees. *Alternative:* the workspace clones linked GitHub repos itself.
-- **A-5** The developer supplies GitHub and tracker credentials per workspace. *Open:* storage location for these secrets (Supabase vault, OS keychain, env file).
+- **A-5** The developer supplies GitHub credentials per workspace and tracker credentials per ticket source. *Open:* storage location for these secrets (Supabase vault, OS keychain, env file).
 - **A-6** Built solo, part-time, with flexible MVP scope and no fixed deadline.
 - **A-7** Phase artifacts are written to fixed, phase-configured paths in the worktree so the workspace can detect them (FR-22) and derive actions (FR-28a).
 - **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations. **Confirmed** by the [S1-04 spike](../spikes/s1-04-headless-resume/).
@@ -186,6 +198,12 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 - **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal. **Partly confirmed** by the [S1-05 spike](../spikes/s1-05-transcript-usage/): the layout and per-message usage hold, but transcripts leave out the tool's small background model calls, so their totals run slightly below the SDK's.
 - **A-11** Switching off the user-level source (FR-41) removes user-level `CLAUDE.md`, agents, skills, commands, plugins, settings and hooks. It does **not** remove auto memory or claude.ai connectors, which need their own switches (OQ-8).
+
+## Open questions (tickets)
+
+- **OQ-16** Should built-in tickets be movable into a connected tracker later, keeping their sessions and plans? *TBD*
+- **OQ-17** Should a workspace with connected sources be able to keep creating built-in tickets, for example as a private backlog, instead of FR-6g turning creation off? *TBD*
+- **OQ-18** Should a session be able to read other linked repositories while working in its own, so that planning can cover work spanning several? *TBD*
 
 ## Open questions (plans)
 

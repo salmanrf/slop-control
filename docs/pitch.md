@@ -7,11 +7,11 @@ summary: "Product pitch: vision, features, and user actions for Slop Control."
 
 ## 1. 🧭 Overview
 
-**Slop Control** is a personal toolkit for a single developer that turns their AI coding assistants (Claude Code or similar tools) into a well-organized crew of helpers. It runs on the developer's own machine, works with almost any software project, and plugs into the ticket tracker they already use.
+**Slop Control** is a personal toolkit for a single developer that turns their AI coding assistants (Claude Code or similar tools) into a well-organized crew of helpers. It runs on the developer's own machine, works with almost any software project, and plugs into the ticket trackers they already use, or gives them a simple built-in one if they have none.
 
 It brings four things together:
 
-- **Tickets stay the source of truth.** The workspace connects to the developer's existing tracker (Jira, Linear, GitHub Issues, …) instead of replacing it.
+- **Tickets stay where they already live.** The workspace connects to any number of the developer's existing trackers (Jira, Linear, GitHub Issues, …) instead of replacing them. A workspace with none connected uses the built-in tracker, so work can start before any setup.
 - **Every AI coding session is tracked against a ticket**, so the developer can always see what work, findings, and decisions happened for a given ticket.
 - **A roster of specialized agents**, each with its own helpers and skills, that can be reached from Slack — so teammates can ask the developer's agents a question about the code without interrupting the developer.
 - **A session orchestrator** that, for each phase of work — investigation, planning, implementation, testing, code review — picks the right agents and skills and starts the session already set up and linked to the ticket.
@@ -34,11 +34,13 @@ It brings four things together:
 
 | Concept | What it is | Relates to |
 |---|---|---|
-| **Workspace** | A home for one project (or product). The app opens with a workspace selector; nothing works until a workspace is created and its sources are linked. | Has linked repositories, a ticket tracker, communication channels, and a wiki |
-| **Linked source** | Something a workspace is connected to: **code repositories** (one or more GitHub repos), a **ticket tracker**, **communication channels** (Slack), and a **wiki** (project knowledge). Some are mandatory, some optional. | Belongs to a workspace |
-| **Ticket** | A unit of work from the developer's existing tracker. The workspace reads and updates it but never owns it. | Has zero or more plans and many sessions |
-| **Plan** | One separately shippable part of a ticket, with its own branch and PR, made of plan items. Most tickets have one; splitting is optional. Plans are revised, never replaced. | Belongs to a ticket; has plan items and sessions |
-| **Session** | One AI coding session (Claude Code or similar) working on a ticket, in one phase. Its findings, decisions, and outcome are kept. | Always belongs to a ticket; optionally to one plan; runs one agent setup |
+| **Workspace** | A home for one project (or product). The app opens with a workspace selector; nothing works until a workspace is created and its sources are linked. | Has linked repositories, ticket sources, communication channels, and a wiki |
+| **Linked source** | Something a workspace is connected to: **code repositories** (one or more GitHub repos), **ticket sources** (zero or more), **communication channels** (Slack), and a **wiki** (project knowledge). Some are mandatory, some optional. | Belongs to a workspace |
+| **Ticket source** | Where tickets come from: the built-in tracker, or a connected source such as a Jira project or one repository's GitHub Issues. Connected sources are set up separately from code repositories, with their own credentials. | Belongs to a workspace; provides tickets |
+| **Built-in tracker** | A simple tracker in every workspace, needing no setup. It is where tickets are created until a source is connected. | The ticket source every workspace starts with |
+| **Ticket** | A unit of work from a ticket source. A connected tracker stays the owner of its tickets; the workspace owns only built-in ones. Either way it works the same. | Has zero or more plans and many sessions |
+| **Plan** | One separately shippable part of a ticket, with its own branch and PR in one repository, made of plan items. Most tickets have one; work spanning several repositories gets one per repository. Plans are revised, never replaced. | Belongs to a ticket; targets one repository; has plan items and sessions |
+| **Session** | One AI coding session (Claude Code or similar) working on a ticket, in one phase and one repository. Its findings, decisions, and outcome are kept. | Always belongs to a ticket; optionally to one plan; runs one agent setup |
 | **Phase** | A stage of work on a ticket: investigation, planning, implementation, automated testing, e2e testing, code review. | Determines which agents and skills a session gets |
 | **Agent** | A specialized AI helper with its own helpers (sub-agents) and skills, and its own Slack identity. | Used in sessions; reachable from Slack |
 | **Test case** | One check that proves a plan item works, marked automated or e2e. Written by the planner in the plan document. | Belongs to a plan item; checked in a testing phase |
@@ -70,8 +72,9 @@ The developer works through a **web dashboard that runs on their own machine**.
 | Group | Feature | What the developer gets |
 |---|---|---|
 | **Workspaces** | Workspace selector | Switch between projects; each keeps its own sources, agents, and history. |
-| | Link sources | Connect code repositories (**required**), plus optionally a ticket tracker, Slack channels, and a wiki. |
-| **Tickets** | Ticket view | See tickets from the existing tracker, with every AI session that worked on each one. |
+| | Link sources | Connect code repositories (**required**), plus optionally ticket sources, Slack channels, and a wiki. |
+| **Tickets** | Ticket view | See tickets from all connected sources in one list, filterable by source, with every AI session that worked on each one. |
+| | Built-in tracker | No tracker connected yet? Create and manage simple tickets right in the workspace. Once a tracker is connected, existing built-in tickets stay workable, and new tickets come from the tracker. |
 | **Sessions** | Session tracker | A history of every AI coding session per ticket: phase, agent setup used, findings, decisions, and outcome. |
 | | One-click session start | Start a session for a ticket's current phase, already set up with the right agents, skills, and a separate working copy of the code. |
 | **Agents** | Agents & skills manager | See which agents, helpers, and skills each phase will use; enable or disable them; install new ones from a catalog or download them. |
@@ -98,7 +101,7 @@ The developer works through a **web dashboard that runs on their own machine**.
 
 | Release | Includes |
 |---|---|
-| **MVP (first release)** | Workspaces & source linking · ticket view · session tracker (**Claude Code** first) · orchestrator with one-click session start · agents & skills manager · built-in project knowledge · drafted actions with approvals inbox · code editor & document viewer · annotations & correction rounds for planning, implementation, test reports and the test strategy · automated & e2e testing phases with test cases, learned test strategy and evidence-backed test reports (local environments only) · token usage tracker · ambient setup view (user-level source off by default) |
+| **MVP (first release)** | Workspaces & source linking · multiple ticket sources (Jira, GitHub Issues) with one ticket view · built-in tracker · session tracker (**Claude Code** first) · orchestrator with one-click session start · agents & skills manager · built-in project knowledge · drafted actions with approvals inbox · code editor & document viewer · annotations & correction rounds for planning, implementation, test reports and the test strategy · automated & e2e testing phases with test cases, learned test strategy and evidence-backed test reports (local environments only) · token usage tracker · ambient setup view (user-level source off by default) |
 | **Later** | Slack agents (explorer, per-agent Slack users, Slack replies through the approvals inbox) · bug investigator with prod-like reproduction · support for other AI coding tools · automatic browser driving for frontend recordings · test strategies that reach shared or remote environments · switches for individual ambient items and other sources · token budgets |
 
 ## 5. 🚶 User Journeys
@@ -106,7 +109,7 @@ The developer works through a **web dashboard that runs on their own machine**.
 ### Set up a workspace (first run)
 
 1. Open the dashboard and create a **workspace** for a project.
-2. Link at least one **code repository**; optionally link the ticket tracker, Slack channels, and a wiki.
+2. Link at least one **code repository**; optionally connect **ticket sources**, Slack channels, and a wiki. With no ticket source connected, tickets are created in the **built-in tracker**.
 3. Fill in the **project knowledge** with a few question-and-answer pairs (how to run tests, how to bring production data local, where env files live, …).
 4. Open the **agents & skills manager**, review the default setup for each phase, and enable, disable, or install agents and skills as needed.
 
@@ -114,7 +117,7 @@ The developer works through a **web dashboard that runs on their own machine**.
 
 1. Pick a ticket from the workspace's ticket view.
 2. The orchestrator **suggests the next phase** (investigation → planning → implementation → automated testing → e2e testing → code review), but the developer can **jump to any phase**, in any order, as many times as needed.
-3. The developer sees which agents and skills the session will use, adjusts if needed, and **starts the session** with one click. It opens already prepared: a separate working copy of the code, the right setup, and linked to the ticket.
+3. The developer sees which repository, agents, and skills the session will use, adjusts if needed, and **starts the session** with one click. It opens already prepared: a separate working copy of the code, the right setup, and linked to the ticket.
 4. The session's findings, decisions, and outcome are recorded on the ticket's **session history**.
    - If the plan or the code needs changes, the developer **annotates** it in the viewer or editor and **sends the comments back**. The agent resumes the session, addresses each comment, and the next round is reviewed the same way until the developer accepts it.
    - In the testing phases, the tester runs the plan's test cases and writes a **test report** with evidence, reading databases, buckets, logs and queues through the workspace's **inspection hooks**. Failures send the work back to an implementation correction round; the first e2e run in a workspace starts by drafting the **test strategy** for approval, including any hooks it needs.

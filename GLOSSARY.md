@@ -7,11 +7,23 @@ A personal workspace that tracks AI coding sessions against the tickets they wor
 ### Work structure
 
 **Ticket**:
-A unit of work that lives in the developer's existing tracker; the workspace reads and updates it but never owns it.
+A unit of work from a ticket source, identified by its source and its key together. The workspace owns it only when that source is the built-in tracker.
 _Avoid_: Issue, task, card
 
+**Tracker**:
+A system that holds tickets, such as Jira, GitHub Issues, or the built-in tracker.
+_Avoid_: Board, ticket system
+
+**Ticket source**:
+Where a workspace's tickets come from: the built-in tracker, or a **connected source**, meaning one scope in an external tracker, such as a Jira project or one repository's GitHub Issues. A workspace may have any number of connected sources, and connecting one is separate from linking a repository.
+_Avoid_: Integration, connector, ticket provider
+
+**Built-in tracker**:
+The simple tracker in every workspace, needing no setup, where tickets are created while the workspace has no connected source.
+_Avoid_: Local tickets, internal tracker, native tracker
+
 **Plan**:
-One separately shippable part of a ticket, with its own branch and its own PR. Splitting a ticket into several plans is optional; most tickets have a single plan.
+One separately shippable part of a ticket, with its own branch and its own PR in one repository. Splitting a ticket into several plans is optional; most tickets have a single plan, and work spanning several repositories has one per repository.
 _Avoid_: Approach, track, alternative, sub-ticket
 
 **Plan Item**:
@@ -23,7 +35,7 @@ The written description of a plan and its plan items, produced and revised in th
 _Avoid_: plan.md (when talking about the concept), spec
 
 **Session**:
-One AI coding run in one phase. Always belongs to a ticket, and optionally to one of that ticket's plans.
+One AI coding run in one phase and one repository. Always belongs to a ticket, and optionally to one of that ticket's plans.
 _Avoid_: Run, job, conversation
 
 **Ticket-level session**:

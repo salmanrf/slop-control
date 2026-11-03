@@ -95,4 +95,4 @@ For now the session brief is the ticket title and body plus a fixed one-line ins
 
 ## ➡️ Likely Sprint 2
 
-Phase setups with scope and stop conditions, the orchestrator's next-phase suggestion, the pre-launch view, the project knowledge MCP, and the Jira adapter.
+Phase setups with scope and stop conditions, the orchestrator's next-phase suggestion, the pre-launch view, the project knowledge MCP, and ticket sources ([ADR-0003](../../adr/0003-ticket-sources-and-built-in-tracker/): several sources per workspace, the built-in tracker, and the Jira adapter).
