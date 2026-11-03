@@ -2,3 +2,8 @@ docs-site/.hugo_build.lock
 public-docs/
 node_modules/
 .DS_Store
+dist/
+coverage/
+.env
+.env.local
+*.tsbuildinfo

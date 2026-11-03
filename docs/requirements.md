@@ -21,7 +21,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 - **FR-7** Sessions must be launched by the workspace; only workspace-launched sessions are tracked in the MVP (importing manually started sessions is out of scope).
 - **FR-8** The MVP must support **Claude Code** as the only session runtime, behind a runtime interface that allows other tools later.
-- **FR-9** Sessions must run headless (Claude Agent SDK / `claude -p` style) and stream their output live into the dashboard.
+- **FR-9** Sessions must run headless (Claude Agent SDK / `claude -p` style), and their status must update live in the dashboard without polling. Live streaming of agent output is not required.
 - **FR-10** Each session must record: ticket, plan (if any, see FR-10b), phase, agent/skill setup used, working copy (worktree) path, start/end time, status, transcript, and a summary of findings/decisions.
 - **FR-11** A **ticket-level session** (no plan) must run in its own git worktree of the linked repository, created by the workspace. A session that belongs to a plan must run in that **plan's worktree** (FR-10d).
 
@@ -36,7 +36,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 ## Session interaction
 
-- **FR-12** From the dashboard, the user must be able to send follow-up messages to a session and answer permission prompts it raises.
+- **FR-12** From the dashboard, the user must be able to stop a running session and, once it has ended, send it a follow-up message that resumes the same session in its worktree. A running session never waits for input: permission prompts are off in auto mode (FR-15), a call nothing approves is denied and the agent carries on, and the denial is visible only in the transcript.
 - **FR-13** Each session must expose a copyable command to continue it manually in a terminal (e.g. `claude --resume <id>` in the worktree), including an SSH-prefixed variant when the workspace runs on a remote host.
 
 ## Phases & orchestration
@@ -124,7 +124,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 - **FR-45** Usage must add up from round to session, plan, phase and ticket, and must be shown in the ticket view and the session history.
 - **FR-46** Each session must record its **baseline context**, meaning the context in use at its first request, before the agent does any work. Each phase setup must show the baselines of its recent sessions.
 - **FR-47** Sub-agent usage must count toward its session's totals, with a breakdown per sub-agent (type and description).
-- **FR-48** The session transcript on disk is the source of truth for usage. Usage must be reconciled from it when a session ends and when the dashboard next opens the session, so turns continued in a terminal (FR-13) are counted. Live streaming only provides a running total until then.
+- **FR-48** The session transcript on disk is the source of truth for usage. Usage must be reconciled from it when a session ends and when the dashboard next opens the session, so turns continued in a terminal (FR-13) are counted. While a session runs, the dashboard may show a running total read from the transcript on disk at intervals, clearly marked as not reconciled; no agent output is streamed for it (FR-9).
 - **FR-49** Token counts must be the main usage figure. Dollar cost is shown only as a secondary "API-equivalent" figure (see A-1).
 
 # Non-Functional Requirements
@@ -132,7 +132,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 ## Scale & performance
 
 - **NFR-1** The app must support **1–5 concurrent sessions** and a handful of workspaces on a single developer machine.
-- **NFR-2** Session output must appear in the dashboard within ~1 s of being emitted by the runtime.
+- **NFR-2** Session status changes must appear in the dashboard within ~1 s of being reported by the runtime.
 
 ## Security
 
@@ -174,10 +174,10 @@ summary: "Functional and non-functional requirements for Slop Control."
 - **A-5** The developer supplies GitHub and tracker credentials per workspace. *Open:* storage location for these secrets (Supabase vault, OS keychain, env file).
 - **A-6** Built solo, part-time, with flexible MVP scope and no fixed deadline.
 - **A-7** Phase artifacts are written to fixed, phase-configured paths in the worktree so the workspace can detect them (FR-22) and derive actions (FR-28a).
-- **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations.
+- **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations. **Confirmed** by the [S1-04 spike](../spikes/s1-04-headless-resume/).
 - **A-9** Each plan produces one PR (open PR is drafted per plan, from the plan's branch). *If wrong:* a plan may ship as several PRs or several plans may share one.
 
-- **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal.
+- **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal. **Partly confirmed** by the [S1-05 spike](../spikes/s1-05-transcript-usage/): the layout and per-message usage hold, but transcripts leave out the tool's small background model calls, so their totals run slightly below the SDK's.
 - **A-11** Switching off the user-level source (FR-41) removes user-level `CLAUDE.md`, agents, skills, commands, plugins, settings and hooks. It does **not** remove auto memory or claude.ai connectors, which need their own switches (OQ-8).
 
 ## Open questions (plans)
