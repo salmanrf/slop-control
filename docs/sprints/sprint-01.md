@@ -9,7 +9,7 @@ summary: "First sprint: launch one tracked Claude Code session for a ticket, in 
 |---|---|
 | **Dates** | 2026-11-02 → 2026-11-15 (2 weeks) |
 | **Capacity** | Solo, part-time (A-6): about **10 focus days** |
-| **Status** | Planned |
+| **Status** | Done: goal met and merged on 2026-11-03. Stretch items S1-14 and S1-15 weren't started and carry over to [Sprint 2](../sprint-02/). |
 
 ## 🎯 Sprint goal
 
