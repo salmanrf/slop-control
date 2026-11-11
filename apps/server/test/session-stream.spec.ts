@@ -2,9 +2,11 @@ import type { Session } from '@slop-control/shared';
 import {
   createHarness,
   seedWorkspace,
+  sendMessage,
   startSession,
   waitForSession,
   type Harness,
+  type Seeded,
 } from './support/session-harness';
 import { resetDatabase, signToken } from './support/test-app';
 
@@ -79,6 +81,7 @@ describe('session status stream', () => {
   let baseUrl: string;
   let token: string;
   let workspaceId: string;
+  let seeded: Seeded;
   const open: StreamClient[] = [];
 
   const listen = async (workspace = workspaceId) => {
@@ -96,7 +99,8 @@ describe('session status stream', () => {
   beforeEach(async () => {
     await resetDatabase();
     h.tracker.tickets.clear();
-    ({ workspaceId } = await seedWorkspace(h));
+    seeded = await seedWorkspace(h);
+    ({ workspaceId } = seeded);
   });
   afterEach(() => {
     open.splice(0).forEach((client) => client.close());
@@ -143,7 +147,7 @@ describe('session status stream', () => {
 
   it('pushes every status change as a full session', async () => {
     const client = await listen();
-    const session = await startSession(h, workspaceId);
+    const session = await startSession(h, seeded);
     expect(await client.next()).toMatchObject({ id: session.id, status: 'starting' });
 
     h.runtime.lastRun.started('abc');
@@ -159,9 +163,49 @@ describe('session status stream', () => {
     expect(ended.resumeCommand).toContain('claude --resume abc');
   });
 
+  it('pushes a follow-up round: running with the new round, then its terminal status', async () => {
+    const session = await startSession(h, seeded);
+    h.runtime.lastRun.started('abc');
+    h.runtime.lastRun.ended('success');
+    await waitForSession(h, session, (s) => s.status === 'ended');
+    const client = await listen();
+
+    await sendMessage(h, session);
+    expect(await client.next()).toMatchObject({
+      id: session.id,
+      status: 'running',
+      round: 2,
+      artifactStatus: null,
+      endedAt: null,
+    });
+
+    h.runtime.lastRun.writeFile('.slop/investigation.md', '# Round 2\n');
+    h.runtime.lastRun.ended('success');
+    expect(await client.next()).toMatchObject({
+      id: session.id,
+      status: 'ended',
+      round: 2,
+      artifactStatus: 'complete',
+    });
+  });
+
+  it('pushes the scope flag with the terminal status, not after it', async () => {
+    const client = await listen();
+    const session = await startSession(h, seeded);
+    await client.next();
+
+    h.runtime.lastRun.writeFile('README.md', 'changed');
+    h.runtime.lastRun.ended('success');
+    expect(await client.next()).toMatchObject({
+      id: session.id,
+      status: 'ended',
+      scopeFlags: ['code_changed'],
+    });
+  });
+
   it('delivers a change within a second of the runtime reporting it', async () => {
     const client = await listen();
-    await startSession(h, workspaceId);
+    await startSession(h, seeded);
     await client.next();
 
     const reportedAt = Date.now();
@@ -172,7 +216,7 @@ describe('session status stream', () => {
 
   it('publishes a change that is already saved', async () => {
     const client = await listen();
-    const session = await startSession(h, workspaceId);
+    const session = await startSession(h, seeded);
     await client.next();
     h.runtime.lastRun.started('abc');
     const pushed = await client.next();
@@ -182,7 +226,7 @@ describe('session status stream', () => {
   });
 
   it('also pushes a removed worktree', async () => {
-    const session = await startSession(h, workspaceId);
+    const session = await startSession(h, seeded);
     h.runtime.lastRun.ended('success');
     await waitForSession(h, session, (s) => s.status === 'ended');
     const client = await listen();
@@ -198,7 +242,7 @@ describe('session status stream', () => {
     const mine = await listen();
     const theirs = await listen(other.workspaceId);
 
-    const session = await startSession(h, other.workspaceId);
+    const session = await startSession(h, other);
     expect((await theirs.next()).id).toBe(session.id);
 
     const race = await Promise.race([
@@ -209,7 +253,7 @@ describe('session status stream', () => {
   });
 
   it('replays nothing; a change made before connecting is visible through REST', async () => {
-    const session = await startSession(h, workspaceId);
+    const session = await startSession(h, seeded);
     h.runtime.lastRun.started('abc');
     let read = await h.api.get(`/workspaces/${workspaceId}/sessions/${session.id}`);
     for (let i = 0; i < 100 && read.body.status !== 'running'; i += 1) {

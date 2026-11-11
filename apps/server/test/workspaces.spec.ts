@@ -28,6 +28,28 @@ describe('workspaces', () => {
     expect(read.body).toEqual(created.body);
   });
 
+  it('gives a new workspace its built-in tracker and phase setups, with no setup', async () => {
+    const { id } = (await t.api.post('/workspaces').send({ name: 'ready' })).body;
+    const sources = await t.api.get(`/workspaces/${id}/sources`);
+    expect(sources.body).toEqual([
+      expect.objectContaining({ type: 'built_in', canCreateTickets: true, hasCredential: false }),
+    ]);
+    const setups = await t.api.get(`/workspaces/${id}/phase-setups`);
+    expect(setups.body.map((setup: { phase: string }) => setup.phase)).toEqual([
+      'investigation',
+      'planning',
+      'implementation',
+      'code_review',
+    ]);
+  });
+
+  it('creates nothing when the name is taken', async () => {
+    const first = (await t.api.post('/workspaces').send({ name: 'taken' })).body;
+    await t.api.post('/workspaces').send({ name: 'taken' });
+    expect((await t.api.get('/workspaces')).body).toEqual([first]);
+    expect((await t.api.get(`/workspaces/${first.id}/sources`)).body).toHaveLength(1);
+  });
+
   it('rejects a duplicate name', async () => {
     await t.api.post('/workspaces').send({ name: 'taken' });
     const res = await t.api.post('/workspaces').send({ name: 'taken' });

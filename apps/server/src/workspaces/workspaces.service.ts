@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import type { LinkedRepo, Workspace } from '@slop-control/shared';
 import { ApiException, notFound, validationFailed } from '../common/api-exception';
+import { isUuid } from '../common/uuid';
 import { Database, isUniqueViolation } from '../db/database';
+import { PhaseSetupsService } from '../phase-setups/phase-setups.service';
+import { TicketSourceStore } from '../tickets/ticket-source-store';
 import { CloneInspector } from './clone-inspector';
 
 interface WorkspaceRow {
@@ -26,17 +29,13 @@ const SELECT_WORKSPACE = `
          exists (select 1 from linked_repo r where r.workspace_id = w.id) as has_linked_repo
   from workspace w`;
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID.test(value);
-}
-
 @Injectable()
 export class WorkspacesService {
   constructor(
     private readonly db: Database,
     private readonly inspector: CloneInspector,
+    private readonly phaseSetups: PhaseSetupsService,
+    private readonly ticketSources: TicketSourceStore,
   ) {}
 
   async list(): Promise<Workspace[]> {
@@ -50,11 +49,18 @@ export class WorkspacesService {
     }
     const trimmed = name.trim();
     try {
-      const { rows } = await this.db.query<{ id: string }>(
-        'insert into workspace (name) values ($1) returning id',
-        [trimmed],
-      );
-      return await this.get(rows[0]!.id);
+      // A workspace is never without its built-in tracker and phase setups (FR-6e, FR-14).
+      const id = await this.db.transaction(async (tx) => {
+        const { rows } = await tx.query<{ id: string }>(
+          'insert into workspace (name) values ($1) returning id',
+          [trimmed],
+        );
+        const workspaceId = rows[0]!.id;
+        await this.ticketSources.createBuiltIn(workspaceId, tx);
+        await this.phaseSetups.createDefaults(workspaceId, tx);
+        return workspaceId;
+      });
+      return await this.get(id);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ApiException(

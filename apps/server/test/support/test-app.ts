@@ -18,6 +18,7 @@ export interface TestApp {
   api: {
     get(path: string): request.Test;
     post(path: string): request.Test;
+    patch(path: string): request.Test;
     delete(path: string): request.Test;
   };
   dataDir: string;
@@ -28,9 +29,13 @@ export interface TestAppOptions {
   /** Nest providers to replace, as [token, instance] pairs. */
   overrides?: [unknown, unknown][];
   dataDir?: string;
+  /** Another database than the shared test one, e.g. one a suite migrates itself. */
+  databaseUrl?: string;
   jwt?: AppConfig['jwt'];
   sshConfigFile?: string;
   heartbeatMs?: number;
+  /** How long a stop request waits for the round to end. */
+  stopGraceMs?: number;
 }
 
 export async function signToken(
@@ -48,7 +53,7 @@ export async function signToken(
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestApp> {
   const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), 'slop-data-'));
   const config: AppConfig = {
-    databaseUrl: TEST_DATABASE_URL,
+    databaseUrl: options.databaseUrl ?? TEST_DATABASE_URL,
     jwt: options.jwt ?? { kind: 'secret', secret: TEST_JWT_SECRET },
     jwtAudience: 'authenticated',
     dataDir,
@@ -56,6 +61,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     githubApiUrl: 'http://127.0.0.1:9',
     sshConfigFile: options.sshConfigFile ?? null,
     heartbeatMs: options.heartbeatMs ?? 30_000,
+    stopGraceMs: options.stopGraceMs ?? 5000,
     host: '127.0.0.1',
     port: 0,
   };
@@ -79,6 +85,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     api: {
       get: (path) => withAuth(http.get(path)),
       post: (path) => withAuth(http.post(path)),
+      patch: (path) => withAuth(http.patch(path)),
       delete: (path) => withAuth(http.delete(path)),
     },
     dataDir,
@@ -90,6 +97,9 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
 export async function resetDatabase(): Promise<void> {
   const client = new Client({ connectionString: TEST_DATABASE_URL });
   await client.connect();
-  await client.query('truncate session_artifact, session, linked_repo, workspace cascade');
+  await client.query(
+    `truncate built_in_ticket_comment, built_in_ticket, session_artifact, session, phase_setup,
+       ticket_source, linked_repo, workspace cascade`,
+  );
   await client.end();
 }

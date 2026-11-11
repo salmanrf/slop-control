@@ -16,6 +16,8 @@ export class AppConfig {
   sshConfigFile!: string | null;
   /** How often the status stream sends a heartbeat comment. */
   heartbeatMs!: number;
+  /** How long a stop request waits for the round to end before answering with the session as it is. */
+  stopGraceMs!: number;
   host!: string;
   port!: number;
 }
@@ -33,6 +35,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     githubApiUrl: env.GITHUB_API_URL ?? 'https://api.github.com',
     sshConfigFile: null,
     heartbeatMs: 30_000,
+    stopGraceMs: 5000,
     host: env.HOST ?? '127.0.0.1',
     port: Number(env.PORT ?? 3000),
   };

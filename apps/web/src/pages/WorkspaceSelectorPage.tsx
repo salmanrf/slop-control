@@ -30,8 +30,8 @@ export function WorkspaceSelectorPage() {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Choose a workspace</h1>
           <p className="max-w-[640px] text-ink-soft">
-            One workspace per project. Each keeps its own linked repos and session history. Nothing
-            runs until a workspace has at least one repository.
+            One workspace per project. Each keeps its own linked repos, ticket sources, and session
+            history. Nothing runs until a workspace has at least one repository.
           </p>
         </div>
 
@@ -105,7 +105,7 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
         <SourceLine linked={workspace.hasLinkedRepo}>
           {workspace.hasLinkedRepo ? (repoNames ?? 'Repo linked') : 'No repo linked yet'}
         </SourceLine>
-        {workspace.hasLinkedRepo && <SourceLine linked>GitHub Issues</SourceLine>}
+        <SourceLine linked>Built-in tracker</SourceLine>
       </div>
     </Link>
   );

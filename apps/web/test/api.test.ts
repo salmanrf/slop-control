@@ -26,10 +26,35 @@ describe('api client', () => {
 
   it('URL-encodes ticket keys', async () => {
     const t = setup(json(200, {}));
-    await t.api.getTicket('w1', 'acme/widgets#12');
+    await t.api.getTicket('w1', 's1', 'acme/widgets#12');
     expect((t.fetchFn.mock.calls[0] as unknown as [string])[0]).toBe(
-      '/api/workspaces/w1/tickets/acme%2Fwidgets%2312',
+      '/api/workspaces/w1/sources/s1/tickets/acme%2Fwidgets%2312',
     );
+  });
+
+  it('lists tickets across sources with its filters in the query', async () => {
+    const t = setup(json(200, { items: [], nextCursor: null, sources: [] }));
+    await t.api.listTickets('w1', { sourceId: 's1', category: 'done', mine: false, cursor: 'c' });
+    expect((t.fetchFn.mock.calls[0] as unknown as [string])[0]).toBe(
+      '/api/workspaces/w1/tickets?sourceId=s1&category=done&mine=false&cursor=c',
+    );
+  });
+
+  it('asks for a launch preview of the chosen phase and repo', async () => {
+    const t = setup(json(200, {}));
+    await t.api.launchPreview('w1', 's1', 'T-1', { phase: 'planning', linkedRepoId: 'r1' });
+    expect((t.fetchFn.mock.calls[0] as unknown as [string])[0]).toBe(
+      '/api/workspaces/w1/sources/s1/tickets/T-1/launch-preview?phase=planning&linkedRepoId=r1',
+    );
+  });
+
+  it('sends a follow-up message to the session', async () => {
+    const t = setup(json(202, {}));
+    await t.api.sendMessage('w1', 'abc', 'Also commit your work.');
+    const [url, init] = t.fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/workspaces/w1/sessions/abc/messages');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ message: 'Also commit your work.' });
   });
 
   it("raises the server's error code and message", async () => {

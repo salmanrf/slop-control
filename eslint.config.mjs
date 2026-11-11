@@ -3,7 +3,16 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', 'docs-site/**', 'public-docs/**', 'supabase/**', '**/coverage/**'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-e2e/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+      'docs-site/**',
+      'public-docs/**',
+      'supabase/**',
+      '**/coverage/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

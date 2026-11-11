@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist-e2e",
+    "types": ["node"]
+  },
+  "include": ["src", "test/e2e", "test/support/scripted-runtime.ts"],
+  "exclude": ["dist", "dist-e2e", "node_modules", "**/*.spec.ts"]
+}

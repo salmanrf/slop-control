@@ -1,4 +1,4 @@
-import type { LaunchablePhase, Phase, Session } from '@slop-control/shared';
+import type { LaunchablePhase, Phase, ScopeFlag, Session } from '@slop-control/shared';
 
 export const PHASES: Phase[] = [
   'investigation',
@@ -27,8 +27,8 @@ const PHASE_LABELS: Record<Phase, string> = {
 
 export const phaseLabel = (phase: Phase) => PHASE_LABELS[phase];
 
-/** Mirrors the server's phase table. It's for display: the server decides what gets checked. */
-const REQUIRED_ARTIFACTS: Record<LaunchablePhase, string> = {
+/** The default paths, for a phase with no session to read its setup from. Display only. */
+const DEFAULT_ARTIFACTS: Record<LaunchablePhase, string> = {
   investigation: '.slop/investigation.md',
   planning: '.slop/plan.md',
   implementation: '.slop/implementation-report.md',
@@ -36,15 +36,118 @@ const REQUIRED_ARTIFACTS: Record<LaunchablePhase, string> = {
 };
 
 export function requiredArtifact(phase: Phase): string | null {
-  return (REQUIRED_ARTIFACTS as Partial<Record<Phase, string>>)[phase] ?? null;
+  return (DEFAULT_ARTIFACTS as Partial<Record<Phase, string>>)[phase] ?? null;
 }
 
-function requiredArtifactName(phase: Phase): string {
-  return requiredArtifact(phase)?.replace('.slop/', '') ?? 'artifact';
+/** The path this session was told to write, from the setup it started with. */
+export function sessionArtifactPath(session: Session): string | null {
+  return session.setup?.stopCondition.requiredArtifactPath ?? requiredArtifact(session.phase);
+}
+
+function requiredArtifactName(session: Session): string {
+  return sessionArtifactPath(session)?.replace('.slop/', '') ?? 'artifact';
+}
+
+/** Round 1 is the session itself, so only later rounds are named. */
+export function roundLabel(session: Pick<Session, 'round'>): string | null {
+  return session.round > 1 ? `Round ${session.round}` : null;
+}
+
+const SCOPE_FLAG_LABELS: Record<ScopeFlag, string> = {
+  code_changed: 'Changed code in a read-only phase',
+};
+
+/** Null when the session stayed within its scope. */
+export function scopeFlagLabel(flags: ScopeFlag[] | undefined): string | null {
+  const labels = (flags ?? []).map((flag) => SCOPE_FLAG_LABELS[flag]).filter(Boolean);
+  return labels.length > 0 ? labels.join(' · ') : null;
+}
+
+export interface ResultWording {
+  label: string;
+  tone: Tone;
+  /** True when an earlier round's stored copy is still there to read. */
+  earlierResult: boolean;
+  detail: string | null;
+}
+
+/**
+ * How the latest round's result reads. A later round that didn't change the artifact is
+ * incomplete, and the copy an earlier round stored is still offered.
+ * @params storedRound: the round of the latest stored artifact, or null with none stored
+ */
+export function resultWording(session: Session, storedRound: number | null): ResultWording | null {
+  if (session.artifactStatus === null) return null;
+  if (session.artifactStatus === 'complete') {
+    const round = roundLabel(session);
+    return {
+      label: round ? `Result complete · ${round.toLowerCase()}` : 'Result complete',
+      tone: 'ok',
+      earlierResult: false,
+      detail: null,
+    };
+  }
+  const name = requiredArtifactName(session);
+  if (session.round > 1 && storedRound !== null) {
+    return {
+      label: `Result incomplete · round ${session.round} wrote nothing new`,
+      tone: 'warn',
+      earlierResult: true,
+      detail: `Round ${session.round} didn't change ${name}. The copy from round ${storedRound} is shown below.`,
+    };
+  }
+  return {
+    label: 'Result incomplete',
+    tone: 'warn',
+    earlierResult: false,
+    detail: `This session didn't produce ${name}.`,
+  };
+}
+
+export type FollowUpAction = 'follow_up' | 'continue' | 'none' | 'not_resumable';
+
+/**
+ * What the dashboard offers for continuing a session: nothing while a round runs, a follow-up
+ * once it has ended, Continue when it also missed its artifact, and a note when Claude Code
+ * never started it, since there is then nothing to resume.
+ */
+export function followUpAction(session: Session): FollowUpAction {
+  if (isActive(session)) return 'none';
+  if (!session.runtimeSessionId) return 'not_resumable';
+  return session.artifactStatus === 'incomplete' ? 'continue' : 'follow_up';
+}
+
+/** The message Continue starts from; the developer can change it before sending. */
+export function continueMessage(session: Session): string {
+  const path = sessionArtifactPath(session);
+  return path
+    ? `You ended without writing the required artifact. Finish the work for this phase and write it as markdown to \`${path}\`.`
+    : 'You ended before finishing. Continue the work for this phase.';
 }
 
 export const isActive = (session: Session) =>
   session.status === 'starting' || session.status === 'running';
+
+const STATUS_ORDER: Record<Session['status'], number> = {
+  starting: 0,
+  running: 1,
+  ended: 2,
+  failed: 2,
+  stopped: 2,
+};
+
+/**
+ * @params incoming: a state of a session just received; cached: the state of the same session already held
+ * @return true when `incoming` is from an earlier round, or from the same round at an earlier status
+ * Orders two states of one session. `ended`, `failed`, and `stopped` count as the same position.
+ */
+export function isOlderSession(
+  incoming: Pick<Session, 'round' | 'status'>,
+  cached: Pick<Session, 'round' | 'status'>,
+): boolean {
+  if (incoming.round !== cached.round) return incoming.round < cached.round;
+  return STATUS_ORDER[incoming.status] < STATUS_ORDER[cached.status];
+}
 
 export type PhaseState = 'done' | 'running' | 'incomplete' | 'idle';
 
@@ -76,8 +179,10 @@ export function sessionOutcome(session: Session): SessionOutcome {
       return { label: 'Stopped', tone: 'neutral' };
     case 'ended':
       return session.artifactStatus === 'complete'
-        ? { label: `Complete · ${requiredArtifactName(session.phase)}`, tone: 'ok' }
-        : { label: `Incomplete · no ${requiredArtifactName(session.phase)}`, tone: 'warn' };
+        ? { label: `Complete · ${requiredArtifactName(session)}`, tone: 'ok' }
+        : session.round > 1
+          ? { label: `Incomplete · round ${session.round} wrote nothing new`, tone: 'warn' }
+          : { label: `Incomplete · no ${requiredArtifactName(session)}`, tone: 'warn' };
   }
 }
 
@@ -157,13 +262,13 @@ export function sessionTimeline(session: Session, now: number = Date.now()): Tim
       ? {
           title: 'Result complete',
           at: null,
-          detail: `${requiredArtifactName(session.phase)} found and stored`,
+          detail: `${requiredArtifactName(session)} found and stored`,
           state: 'done',
         }
       : {
           title: 'Result incomplete',
           at: null,
-          detail: `${requiredArtifactName(session.phase)} was not produced`,
+          detail: `${requiredArtifactName(session)} was not produced`,
           state: 'warn',
         },
   );

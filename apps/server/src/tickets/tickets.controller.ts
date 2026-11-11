@@ -1,37 +1,45 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import type { Ticket, TicketPage, TicketQuery } from '@slop-control/shared';
+import type { MergedTicketPage, Ticket, TicketQuery } from '@slop-control/shared';
 import { TicketsService } from './tickets.service';
 
-const STATES: readonly unknown[] = ['open', 'closed', 'all'] satisfies TicketQuery['state'][];
+const CATEGORIES: readonly unknown[] = [
+  'open',
+  'in_progress',
+  'done',
+  'not_done',
+  'all',
+] satisfies TicketQuery['category'][];
 
-@Controller('workspaces/:workspaceId/tickets')
+@Controller('workspaces/:workspaceId')
 export class TicketsController {
   constructor(private readonly tickets: TicketsService) {}
 
-  @Get()
+  @Get('tickets')
   list(
     @Param('workspaceId') workspaceId: string,
-    @Query('linkedRepoId') linkedRepoId: string | undefined,
+    @Query('sourceId') sourceId: string | undefined,
     @Query('search') search: string | undefined,
-    @Query('state') state: string | undefined,
+    @Query('category') category: string | undefined,
+    @Query('mine') mine: string | undefined,
     @Query('cursor') cursor: string | undefined,
-  ): Promise<TicketPage> {
-    const query: TicketQuery = {};
+  ): Promise<MergedTicketPage> {
+    const query: TicketQuery = { mine: mine !== 'false' };
     if (typeof search === 'string' && search) query.search = search;
-    if (STATES.includes(state)) query.state = state as TicketQuery['state'];
+    if (CATEGORIES.includes(category)) query.category = category as TicketQuery['category'];
     if (typeof cursor === 'string' && cursor) query.cursor = cursor;
     return this.tickets.list(
       workspaceId,
-      typeof linkedRepoId === 'string' ? linkedRepoId : undefined,
+      typeof sourceId === 'string' && sourceId ? sourceId : undefined,
       query,
     );
   }
 
-  @Get(':ticketKey')
+  @Get('sources/:sourceId/tickets/:ticketKey')
   get(
     @Param('workspaceId') workspaceId: string,
+    @Param('sourceId') sourceId: string,
     @Param('ticketKey') ticketKey: string,
   ): Promise<Ticket> {
-    return this.tickets.get(workspaceId, ticketKey);
+    return this.tickets.get(workspaceId, sourceId, ticketKey);
   }
 }

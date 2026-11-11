@@ -8,6 +8,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
+    "build:e2e": "tsc -p tsconfig.e2e.json",
+    "start:e2e": "node dist-e2e/test/e2e/main.js",
     "test:smoke": "CLAUDE_SMOKE=1 NODE_OPTIONS=--experimental-vm-modules jest test/runtime.smoke.spec.ts"
   },
   "dependencies": {

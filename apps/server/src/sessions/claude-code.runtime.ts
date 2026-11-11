@@ -4,12 +4,19 @@ import type {
   RuntimeHandle,
   RuntimeReadiness,
   RuntimeResumeInput,
+  RuntimeSetup,
   RuntimeStartInput,
 } from '@slop-control/shared';
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppConfig } from '../config';
+import {
+  BASELINE_ENV,
+  baselineScopeOptions,
+  checkScopeEnforcement,
+  gitCommonDir,
+} from './baseline-scope';
 import { SessionRuntime } from './runtime';
 
 type SdkMessage = Record<string, unknown>;
@@ -23,6 +30,8 @@ export type SdkQuery = (params: {
 export interface ClaudeCodeDeps {
   claudeCommand: string;
   loadQuery: () => Promise<SdkQuery>;
+  /** Null if this host can enforce the baseline scope, or what's missing. Defaults to checking the host. */
+  checkScopeEnforcement?: () => Promise<string | null>;
 }
 
 export const CLAUDE_CODE_DEPS = Symbol('CLAUDE_CODE_DEPS');
@@ -87,27 +96,30 @@ export class ClaudeCodeRuntime extends SessionRuntime {
 
   async checkReady(): Promise<RuntimeReadiness> {
     const result = await this.readAuthStatus();
-    if (result.ok) {
-      if (result.status.loggedIn) return { ready: true };
+    if (!result.ok) {
+      return result.reason === 'missing'
+        ? {
+            ready: false,
+            message: "Claude Code isn't installed on the host. Install it and sign in.",
+          }
+        : { ready: false, message: "Claude Code's sign-in status couldn't be read on the host." };
+    }
+    if (!result.status.loggedIn) {
       return {
         ready: false,
         message: "Claude Code isn't signed in. Run `claude auth login` on the host.",
       };
     }
-    return result.reason === 'missing'
-      ? {
-          ready: false,
-          message: "Claude Code isn't installed on the host. Install it and sign in.",
-        }
-      : { ready: false, message: "Claude Code's sign-in status couldn't be read on the host." };
+    const unenforceable = await this.scopeUnenforceable();
+    return unenforceable ? { ready: false, message: unenforceable } : { ready: true };
   }
 
   start(input: RuntimeStartInput): RuntimeHandle {
-    return this.open(input.brief, input.cwd, {});
+    return this.open(input.brief, input.cwd, input.setup, {});
   }
 
   resume(input: RuntimeResumeInput): RuntimeHandle {
-    return this.open(input.message, input.cwd, { resume: input.runtimeSessionId });
+    return this.open(input.message, input.cwd, input.setup, { resume: input.runtimeSessionId });
   }
 
   async terminateLeftovers(cwd: string): Promise<void> {
@@ -128,22 +140,25 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     await terminate(agents.flatMap((pid) => [pid, ...descendants(pid, processes)]));
   }
 
-  private open(prompt: string, cwd: string, extra: Record<string, unknown>): RuntimeHandle {
+  /** Says why a session can't run here under the baseline scope, or null if it can. */
+  private async scopeUnenforceable(): Promise<string | null> {
+    const missing = await (this.deps.checkScopeEnforcement ?? checkScopeEnforcement)();
+    return missing
+      ? `This host can't enforce a session's scope (${missing}), so sessions don't run here.`
+      : null;
+  }
+
+  private open(
+    prompt: string,
+    cwd: string,
+    setup: RuntimeSetup,
+    extra: Record<string, unknown>,
+  ): RuntimeHandle {
     const abortController = new AbortController();
     const state = { stopRequested: false };
-    const options = {
-      ...extra,
-      cwd,
-      env: this.childEnv(),
-      abortController,
-      permissionMode: 'auto',
-      // Nobody is watching: anything that would prompt is denied, and the agent carries on.
-      permissionPrompts: 'none',
-      disallowedTools: ['AskUserQuestion'],
-    };
 
     return {
-      events: this.events(prompt, cwd, options, abortController, state),
+      events: this.events(prompt, cwd, setup, extra, abortController, state),
       stop: async () => {
         state.stopRequested = true;
         abortController.abort();
@@ -151,10 +166,33 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     };
   }
 
+  /** The same for a start and a resume, apart from `extra`. No field of `setup` can drop the baseline scope. */
+  private async options(
+    cwd: string,
+    setup: RuntimeSetup,
+    extra: Record<string, unknown>,
+    abortController: AbortController,
+  ): Promise<Record<string, unknown>> {
+    return {
+      ...extra,
+      cwd,
+      env: { ...this.childEnv(), ...BASELINE_ENV },
+      abortController,
+      permissionMode: 'auto',
+      // Nobody is watching: anything that would prompt is denied, and the agent carries on.
+      permissionPrompts: 'none',
+      disallowedTools: ['AskUserQuestion'],
+      // The project source carries the repo's `.claude/` and `CLAUDE.md`, and is always on.
+      settingSources: setup.userLevelSource ? ['user', 'project', 'local'] : ['project', 'local'],
+      ...baselineScopeOptions(await gitCommonDir(cwd)),
+    };
+  }
+
   private async *events(
     prompt: string,
     cwd: string,
-    options: Record<string, unknown>,
+    setup: RuntimeSetup,
+    extra: Record<string, unknown>,
     abortController: AbortController,
     state: { stopRequested: boolean },
   ): AsyncGenerator<RuntimeEvent> {
@@ -162,8 +200,14 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     let started = false;
 
     try {
+      const unenforceable = await this.scopeUnenforceable();
+      if (unenforceable) {
+        yield { type: 'session_ended', outcome: 'error', message: unenforceable };
+        return;
+      }
       const auth = await this.readAuthStatus();
       const projectsDirectory = auth.ok ? auth.status.projectsDirectory : null;
+      const options = await this.options(cwd, setup, extra, abortController);
       const query = await this.deps.loadQuery();
 
       for await (const raw of query({ prompt, options })) {

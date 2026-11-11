@@ -10,8 +10,10 @@ import {
 import { useEffect, useState } from 'react';
 import { WorkspaceLayout } from './components/AppShell';
 import { clearSignInExpired, supabase, wasSignInExpired } from './lib/supabase';
+import { PhaseSetupsPage } from './pages/PhaseSetupsPage';
 import { SessionPage } from './pages/SessionPage';
 import { SignInPage } from './pages/SignInPage';
+import { SourcesPage } from './pages/SourcesPage';
 import { TicketPage } from './pages/TicketPage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { WorkspaceSelectorPage } from './pages/WorkspaceSelectorPage';
@@ -32,8 +34,18 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: WorkspacePage }),
     createRoute({
       getParentRoute: () => workspaceRoute,
-      path: 'tickets/$ticketKey',
+      path: 'sources/$sourceId/tickets/$ticketKey',
       component: TicketPage,
+    }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: 'sources',
+      component: SourcesPage,
+    }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: 'phase-setups',
+      component: PhaseSetupsPage,
     }),
     createRoute({
       getParentRoute: () => workspaceRoute,

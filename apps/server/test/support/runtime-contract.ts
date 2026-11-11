@@ -15,7 +15,7 @@ export interface ContractDriver {
 const INPUT: RuntimeStartInput = {
   brief: 'Do the thing.',
   cwd: process.cwd(),
-  setup: { permissionMode: 'auto' },
+  setup: { permissionMode: 'auto', scope: { mayChangeCode: false }, userLevelSource: false },
 };
 
 async function collect(handle: RuntimeHandle): Promise<RuntimeEvent[]> {

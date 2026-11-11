@@ -42,6 +42,12 @@ describe('linked repos', () => {
     expect(workspace.body.hasLinkedRepo).toBe(true);
   });
 
+  it("doesn't connect the repo's Issues as a ticket source", async () => {
+    await link(makeClone());
+    const sources = await t.api.get(`/workspaces/${workspaceId}/sources`);
+    expect(sources.body.map((source: { type: string }) => source.type)).toEqual(['built_in']);
+  });
+
   it.each([
     ['https://github.com/acme/widgets.git'],
     ['https://github.com/acme/widgets'],
