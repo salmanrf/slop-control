@@ -3,7 +3,11 @@ public-docs/
 node_modules/
 .DS_Store
 dist/
+dist-e2e/
 coverage/
 .env
 .env.local
 *.tsbuildinfo
+apps/e2e/test-results/
+apps/e2e/playwright-report/
+apps/e2e/.auth/
