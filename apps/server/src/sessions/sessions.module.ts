@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PhaseSetupsModule } from '../phase-setups/phase-setups.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { WorktreesModule } from '../worktrees/worktrees.module';
@@ -10,7 +11,7 @@ import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 
 @Module({
-  imports: [TicketsModule, WorkspacesModule, WorktreesModule],
+  imports: [TicketsModule, WorkspacesModule, WorktreesModule, PhaseSetupsModule],
   controllers: [SessionsController],
   providers: [
     SessionsService,

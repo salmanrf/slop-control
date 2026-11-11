@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent, RuntimeHandle } from '@slop-control/shared';
+import type { RuntimeEvent, RuntimeHandle, RuntimeSetup } from '@slop-control/shared';
+import { BASELINE_ENV, BLOCKED_MESSAGE, denyOutwardActions } from '../src/sessions/baseline-scope';
 import { ClaudeCodeRuntime, type SdkQuery } from '../src/sessions/claude-code.runtime';
 import { FakeRun, FakeRuntime } from './support/fake-runtime';
-import { tempDir } from './support/git';
+import { makeClone, tempDir } from './support/git';
 import { describeRuntimeContract } from './support/runtime-contract';
 import { CANARY_GITHUB_TOKEN } from './support/test-env';
 
@@ -71,10 +72,19 @@ function fakeClaude(script: string): string {
 
 const LOGGED_IN = `echo '{"loggedIn":true,"email":"person@example.invalid","orgName":"Org","projectsDirectory":"/projects"}'`;
 
-function makeRuntime(sdk: ScriptedSdk, claudeCommand = fakeClaude(LOGGED_IN)): ClaudeCodeRuntime {
+/** The host check is stubbed, so these cases don't depend on the machine they run on. */
+function makeRuntime(
+  sdk: ScriptedSdk,
+  claudeCommand = fakeClaude(LOGGED_IN),
+  scopeProblem: string | null = null,
+): ClaudeCodeRuntime {
   return new ClaudeCodeRuntime(
     { githubToken: CANARY_GITHUB_TOKEN },
-    { claudeCommand, loadQuery: async () => sdk.query },
+    {
+      claudeCommand,
+      loadQuery: async () => sdk.query,
+      checkScopeEnforcement: async () => scopeProblem,
+    },
   );
 }
 
@@ -84,7 +94,27 @@ async function collect(handle: RuntimeHandle): Promise<RuntimeEvent[]> {
   return events;
 }
 
-const INPUT = { brief: 'Do it.', cwd: process.cwd(), setup: { permissionMode: 'auto' as const } };
+const READ_ONLY: RuntimeSetup = {
+  permissionMode: 'auto',
+  scope: { mayChangeCode: false },
+  userLevelSource: false,
+};
+const INPUT = { brief: 'Do it.', cwd: process.cwd(), setup: READ_ONLY };
+const RESUME = { runtimeSessionId: 'sdk-1', message: 'Now fix it.', cwd: process.cwd() };
+
+/** Every combination a phase setup can produce. */
+const SETUPS: [string, RuntimeSetup][] = [
+  ['a read-only phase', READ_ONLY],
+  ['a phase that may change code', { ...READ_ONLY, scope: { mayChangeCode: true } }],
+  ['the user-level source on', { ...READ_ONLY, userLevelSource: true }],
+  ['both', { permissionMode: 'auto', scope: { mayChangeCode: true }, userLevelSource: true }],
+];
+
+/** The baseline scope options, without the parts that differ per run. */
+function baselineOf(options: Record<string, unknown>) {
+  const { strictMcpConfig, mcpServers, sandbox, settings, managedSettings, hooks } = options;
+  return { strictMcpConfig, mcpServers, sandbox, settings, managedSettings, hooks };
+}
 
 describe('ClaudeCodeRuntime', () => {
   describeRuntimeContract('Claude Code over a scripted SDK', () => {
@@ -287,7 +317,7 @@ describe('ClaudeCodeRuntime', () => {
         runtimeSessionId: 'sdk-1',
         message: 'Now fix it.',
         cwd: process.cwd(),
-        setup: { permissionMode: 'auto' },
+        setup: READ_ONLY,
       });
       sdk.push(INIT, SUCCESS, 'close');
       await collect(handle);
@@ -297,6 +327,226 @@ describe('ClaudeCodeRuntime', () => {
         cwd: process.cwd(),
         permissionMode: 'auto',
       });
+    });
+  });
+
+  const optionsOf = async (kind: 'start' | 'resume', setup: RuntimeSetup, cwd = process.cwd()) => {
+    const sdk = new ScriptedSdk();
+    const runtime = makeRuntime(sdk);
+    const handle =
+      kind === 'start'
+        ? runtime.start({ ...INPUT, cwd, setup })
+        : runtime.resume({ ...RESUME, cwd, setup });
+    sdk.push(INIT, SUCCESS, 'close');
+    await collect(handle);
+    return sdk.options!;
+  };
+
+  describe('user-level source (FR-41)', () => {
+    it.each([['start'], ['resume']] as const)(
+      'leaves ~/.claude out of a %s by default, keeping the project and local sources',
+      async (kind) => {
+        const options = await optionsOf(kind, READ_ONLY);
+        expect(options.settingSources).toEqual(['project', 'local']);
+      },
+    );
+
+    it.each([['start'], ['resume']] as const)(
+      'adds the user source to a %s when the switch is on',
+      async (kind) => {
+        const options = await optionsOf(kind, { ...READ_ONLY, userLevelSource: true });
+        expect(options.settingSources).toEqual(
+          expect.arrayContaining(['user', 'project', 'local']),
+        );
+        expect(options.settingSources).toHaveLength(3);
+      },
+    );
+
+    it('is still ready when signed in, since sign-in does not come from the user source', async () => {
+      await expect(makeRuntime(new ScriptedSdk()).checkReady()).resolves.toEqual({ ready: true });
+    });
+  });
+
+  describe('baseline scope (FR-27)', () => {
+    it.each(SETUPS)('is applied to a start and a resume with %s', async (_name, setup) => {
+      for (const kind of ['start', 'resume'] as const) {
+        const options = await optionsOf(kind, setup);
+        expect(options.sandbox).toMatchObject({
+          enabled: true,
+          failIfUnavailable: true,
+          allowUnsandboxedCommands: false,
+        });
+        expect(options.strictMcpConfig).toBe(true);
+        expect(options.mcpServers).toEqual({});
+        expect(options.settings).toMatchObject({ disableClaudeAiConnectors: true });
+        const deny = (options.settings as { permissions: { deny: string[] } }).permissions.deny;
+        expect(deny).toEqual(
+          expect.arrayContaining(['Bash(git push:*)', 'Bash(gh:*)', 'Bash(ssh:*)']),
+        );
+        const hooks = options.hooks as { PreToolUse: { hooks: unknown[] }[] };
+        expect(hooks.PreToolUse[0]!.hooks).toContain(denyOutwardActions);
+      }
+    });
+
+    it('is identical for a start and a resume, whatever the setup says', async () => {
+      const reference = baselineOf(await optionsOf('start', READ_ONLY));
+      for (const [, setup] of SETUPS) {
+        expect(baselineOf(await optionsOf('start', setup))).toEqual(reference);
+        expect(baselineOf(await optionsOf('resume', setup))).toEqual(reference);
+      }
+    });
+
+    it("keeps the developer's account connectors out, in the managed tier as well", async () => {
+      const options = await optionsOf('start', READ_ONLY);
+      expect(options.managedSettings).toMatchObject({
+        disableClaudeAiConnectors: true,
+        sandbox: { enabled: true, allowUnsandboxedCommands: false },
+      });
+    });
+
+    it("lets a worktree's commits reach the clone's git folder, and nothing else outside it", async () => {
+      const clone = makeClone();
+      const options = await optionsOf('start', READ_ONLY, clone);
+      const sandbox = options.sandbox as { filesystem: { allowWrite: string[] } };
+      expect(sandbox.filesystem.allowWrite).toEqual([join(clone, '.git')]);
+    });
+
+    it('denies reading where the host keeps its logins', async () => {
+      const options = await optionsOf('start', READ_ONLY);
+      const sandbox = options.sandbox as { filesystem: { denyRead: string[] } };
+      expect(sandbox.filesystem.denyRead).toEqual(
+        expect.arrayContaining(['~/.ssh', '~/.config/gh', '~/.git-credentials']),
+      );
+    });
+
+    it('blocks GitHub on the network', async () => {
+      const options = await optionsOf('start', READ_ONLY);
+      const sandbox = options.sandbox as { network: { deniedDomains: string[] } };
+      expect(sandbox.network.deniedDomains).toEqual(
+        expect.arrayContaining(['github.com', '*.github.com']),
+      );
+    });
+
+    describe('when the host cannot enforce it', () => {
+      const PROBLEM = 'bwrap must be installed';
+
+      it.each([['start'], ['resume']] as const)(
+        'ends a %s with an error that says so, and never starts the agent',
+        async (kind) => {
+          const sdk = new ScriptedSdk();
+          const runtime = makeRuntime(sdk, fakeClaude(LOGGED_IN), PROBLEM);
+          const handle =
+            kind === 'start'
+              ? runtime.start(INPUT)
+              : runtime.resume({ ...RESUME, setup: READ_ONLY });
+          expect(await collect(handle)).toEqual([
+            { type: 'session_ended', outcome: 'error', message: expect.stringContaining(PROBLEM) },
+          ]);
+          expect(sdk.options).toBeNull();
+        },
+      );
+
+      it('reports not ready with the same reason', async () => {
+        const sdk = new ScriptedSdk();
+        const runtime = makeRuntime(sdk, fakeClaude(LOGGED_IN), PROBLEM);
+        const readiness = await runtime.checkReady();
+        const [ended] = await collect(runtime.start(INPUT));
+        expect(readiness).toEqual({ ready: false, message: expect.stringContaining(PROBLEM) });
+        expect((ended as { message: string }).message).toBe(
+          (readiness as { message: string }).message,
+        );
+      });
+
+      it('still asks for a sign-in first when signed out', async () => {
+        const claude = fakeClaude(`echo '{"loggedIn":false}'; exit 1`);
+        const readiness = await makeRuntime(new ScriptedSdk(), claude, PROBLEM).checkReady();
+        expect(readiness).toEqual({
+          ready: false,
+          message: expect.stringContaining('claude auth login'),
+        });
+      });
+    });
+
+    it('does not fail a session for a call the baseline scope denied', async () => {
+      const sdk = new ScriptedSdk();
+      const handle = makeRuntime(sdk).start(INPUT);
+      sdk.push(
+        INIT,
+        {
+          type: 'system',
+          subtype: 'permission_denied',
+          tool_name: 'Bash',
+          message: BLOCKED_MESSAGE,
+        },
+        SUCCESS,
+        'close',
+      );
+      expect((await collect(handle)).at(-1)).toMatchObject({ outcome: 'success' });
+    });
+  });
+
+  describe('the pre-tool hook', () => {
+    const bash = (command: string) =>
+      denyOutwardActions({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+    const DENIED = {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: BLOCKED_MESSAGE,
+      },
+    };
+
+    it.each([
+      ['git push'],
+      ['git push --force origin main'],
+      ['git -c credential.helper= push origin HEAD:refs/heads/x'],
+      ['cd repo && git push'],
+      ['gh pr create --fill'],
+      ['echo hi; gh issue comment 1 -b x'],
+      ['ssh git@github.com'],
+      ['scp file host:/tmp'],
+      ['sftp host'],
+    ])('denies `%s` with a reason the agent can read', async (command) => {
+      await expect(bash(command)).resolves.toEqual(DENIED);
+    });
+
+    it.each([
+      ['git commit -m "work"'],
+      ['git status'],
+      ['npm install left-pad'],
+      ['git log --oneline'],
+      ['cat sshd_config.md'],
+      ['echo high'],
+    ])('lets `%s` through', async (command) => {
+      await expect(bash(command)).resolves.toEqual({});
+    });
+
+    it('denies any MCP tool, since no MCP server is part of a session', async () => {
+      await expect(
+        denyOutwardActions({
+          hook_event_name: 'PreToolUse',
+          tool_name: 'mcp__claude_ai_Github__push_files',
+          tool_input: {},
+        }),
+      ).resolves.toEqual(DENIED);
+    });
+
+    it('leaves other tools and other hook events alone', async () => {
+      await expect(
+        denyOutwardActions({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} }),
+      ).resolves.toEqual({});
+      await expect(
+        denyOutwardActions({
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'git push' },
+        }),
+      ).resolves.toEqual({});
+      await expect(denyOutwardActions(null)).resolves.toEqual({});
     });
   });
 
@@ -388,13 +638,64 @@ describe('ClaudeCodeRuntime', () => {
       process.env = { ...saved };
     });
 
-    const envOfChild = async () => {
-      const sdk = new ScriptedSdk();
-      const handle = makeRuntime(sdk).start(INPUT);
-      sdk.push(INIT, SUCCESS, 'close');
-      await collect(handle);
-      return sdk.options!.env as Record<string, string>;
-    };
+    const envOfChild = async (kind: 'start' | 'resume' = 'start') =>
+      (await optionsOf(kind, READ_ONLY)).env as Record<string, string>;
+
+    /** What the runtime lets through from the host, apart from the `ANTHROPIC_` prefix. */
+    const FROM_HOST = new Set([
+      'HOME',
+      'PATH',
+      'USER',
+      'LOGNAME',
+      'SHELL',
+      'TMPDIR',
+      'TMP',
+      'TEMP',
+      'LANG',
+      'LC_ALL',
+      'LC_CTYPE',
+      'TERM',
+      'NODE_EXTRA_CA_CERTS',
+      'SSL_CERT_FILE',
+      'HTTP_PROXY',
+      'HTTPS_PROXY',
+      'NO_PROXY',
+      'http_proxy',
+      'https_proxy',
+      'no_proxy',
+      'CLAUDE_CONFIG_DIR',
+      'CLAUDE_CODE_OAUTH_TOKEN',
+    ]);
+
+    it.each([['start'], ['resume']] as const)(
+      'gives a %s nothing but the allowlist and the baseline scope variables',
+      async (kind) => {
+        process.env.GITHUB_TOKEN = CANARY_GITHUB_TOKEN;
+        process.env.GH_TOKEN = CANARY_GITHUB_TOKEN;
+        process.env.SSH_AUTH_SOCK = '/tmp/agent.sock';
+        process.env.SOME_RANDOM_API_KEY = 'nope';
+        const env = await envOfChild(kind);
+        expect(JSON.stringify(env)).not.toContain(CANARY_GITHUB_TOKEN);
+        expect(env).not.toHaveProperty('SSH_AUTH_SOCK');
+        const unexpected = Object.keys(env).filter(
+          (name) =>
+            !FROM_HOST.has(name) && !name.startsWith('ANTHROPIC_') && !(name in BASELINE_ENV),
+        );
+        expect(unexpected).toEqual([]);
+        expect(env).toMatchObject(BASELINE_ENV);
+      },
+    );
+
+    it("points git and gh away from the host's logins, even if the host set them", async () => {
+      process.env.GIT_SSH_COMMAND = 'ssh -i ~/.ssh/id_real';
+      process.env.GH_CONFIG_DIR = '/home/dev/.config/gh';
+      const env = await envOfChild();
+      expect(env.GIT_SSH_COMMAND).toBe(BASELINE_ENV.GIT_SSH_COMMAND);
+      expect(env.GH_CONFIG_DIR).toBe(BASELINE_ENV.GH_CONFIG_DIR);
+      expect(env.GIT_TERMINAL_PROMPT).toBe('0');
+      expect(env.GIT_CONFIG_KEY_0).toBe('credential.helper');
+      expect(env.GIT_CONFIG_VALUE_0).toBe('');
+    });
 
     it('leaves out the GitHub token and anything not on the allowlist', async () => {
       process.env.GITHUB_TOKEN = CANARY_GITHUB_TOKEN;
