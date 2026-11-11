@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type {
-  LinkedRepo,
   Ticket,
   TicketPage,
   TicketQuery,
+  TicketSource,
   TicketSummary,
 } from '@slop-control/shared';
 import { AppConfig } from '../config';
 import {
+  TICKET_PAGE_SIZE as PAGE_SIZE,
   TicketNotFoundError,
   TrackerAdapter,
   TrackerAdapterFactory,
@@ -15,10 +16,11 @@ import {
   TrackerUnavailableError,
 } from './tracker';
 
-const PAGE_SIZE = 30;
 const REQUEST_TIMEOUT_MS = 10_000;
-/** Search qualifiers that could widen a search beyond this repo's issues. */
-const SCOPE_QUALIFIER = /^-?(repo|org|user|is|type|state):/i;
+/** Search qualifiers that could widen a search beyond this repo's issues, or undo its filters. */
+const SCOPE_QUALIFIER = /^-?(repo|org|user|is|type|state|assignee|sort):/i;
+
+type GitHubState = 'open' | 'closed' | 'all';
 
 interface GitHubIssue {
   number: number;
@@ -33,6 +35,10 @@ interface GitHubIssue {
 export interface GitHubOptions {
   token: string;
   apiUrl: string;
+  /** The source its tickets are reported under. */
+  sourceId: string;
+  /** Remembers the token's login between requests, since it's needed for every `mine` list. */
+  loginCache?: Map<string, string>;
 }
 
 /** Read-only GitHub Issues. Error messages never include response bodies, so a token can't echo into them. */
@@ -43,26 +49,42 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
     private readonly options: GitHubOptions,
   ) {}
 
-  async list(query: TicketQuery): Promise<TicketPage> {
+  async verify(): Promise<void> {
+    const response = await this.request(`/repos/${this.owner}/${this.repo}`);
+    if (response.status === 404) throw this.hidden();
+    this.throwOnFailure(response);
+  }
+
+  async list(query: TicketQuery): Promise<TicketPage & { mineApplied: boolean }> {
+    const wantMine = query.mine ?? true;
+    // With no token there is no user to filter by, so everything is returned and the caller is told.
+    const mineApplied = !wantMine || this.options.token !== '';
+    const state = githubState(query.category ?? 'not_done');
+    // GitHub Issues has no in-progress status, so there is nothing to ask for.
+    if (state === null) return { items: [], nextCursor: null, mineApplied };
+
+    const assignee = wantMine && this.options.token ? await this.login() : null;
     const page = decodeCursor(query.cursor);
-    const state = query.state ?? 'open';
     const search = query.search?.trim();
 
     const response = search
       ? await this.request('/search/issues', {
-          q: this.searchQuery(search, state),
+          q: this.searchQuery(search, state, assignee),
+          sort: 'updated',
+          order: 'desc',
           per_page: String(PAGE_SIZE),
           page: String(page),
         })
       : await this.request(`/repos/${this.owner}/${this.repo}/issues`, {
           state,
+          sort: 'updated',
+          direction: 'desc',
+          ...(assignee ? { assignee } : {}),
           per_page: String(PAGE_SIZE),
           page: String(page),
         });
 
-    if (response.status === 404) {
-      throw new TrackerAuthError(`GitHub can't show ${this.owner}/${this.repo} to this token.`);
-    }
+    if (response.status === 404) throw this.hidden();
     this.throwOnFailure(response);
 
     const json = (await response.json()) as GitHubIssue[] | { items: GitHubIssue[] };
@@ -70,6 +92,7 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
     return {
       items: issues.filter((issue) => !issue.pull_request).map((issue) => this.toSummary(issue)),
       nextCursor: hasNextPage(response) ? encodeCursor(page + 1) : null,
+      mineApplied,
     };
   }
 
@@ -86,13 +109,38 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
     return { ...this.toSummary(issue), body: issue.body ?? '' };
   }
 
-  private searchQuery(search: string, state: 'open' | 'closed' | 'all'): string {
+  /** The login of the token's user, for the assigned-to-me filter. */
+  private async login(): Promise<string> {
+    const cached = this.options.loginCache?.get(this.options.token);
+    if (cached) return cached;
+    const response = await this.request('/user');
+    this.throwOnFailure(response);
+    const { login } = (await response.json()) as { login?: unknown };
+    if (typeof login !== 'string' || login === '') {
+      throw new TrackerUnavailableError("GitHub didn't say whose token this is.");
+    }
+    this.options.loginCache?.set(this.options.token, login);
+    return login;
+  }
+
+  private hidden(): TrackerAuthError {
+    return new TrackerAuthError(`GitHub can't show ${this.owner}/${this.repo} to this token.`);
+  }
+
+  private searchQuery(search: string, state: GitHubState, assignee: string | null): string {
     const text = search
       .split(/\s+/)
       .filter((word) => !SCOPE_QUALIFIER.test(word))
       .join(' ');
     const stateQualifier = state === 'all' ? [] : [`state:${state}`];
-    return [text, `repo:${this.owner}/${this.repo}`, 'is:issue', ...stateQualifier]
+    const assigneeQualifier = assignee ? [`assignee:${assignee}`] : [];
+    return [
+      text,
+      `repo:${this.owner}/${this.repo}`,
+      'is:issue',
+      ...stateQualifier,
+      ...assigneeQualifier,
+    ]
       .filter(Boolean)
       .join(' ');
   }
@@ -106,9 +154,11 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
 
   private toSummary(issue: GitHubIssue): TicketSummary {
     return {
+      sourceId: this.options.sourceId,
       key: `${this.owner}/${this.repo}#${issue.number}`,
       title: issue.title,
       status: issue.state,
+      statusCategory: issue.state === 'closed' ? 'done' : 'open',
       url: issue.html_url,
       updatedAt: issue.updated_at,
     };
@@ -145,18 +195,32 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
   }
 }
 
+/** A source has no stored token yet, so every GitHub Issues source uses the server's `GITHUB_TOKEN`. */
 @Injectable()
 export class GitHubTrackerFactory extends TrackerAdapterFactory {
+  private readonly loginCache = new Map<string, string>();
+
   constructor(private readonly config: AppConfig) {
     super();
   }
 
-  forRepo(repo: LinkedRepo): TrackerAdapter {
-    return new GitHubIssuesAdapter(repo.githubOwner, repo.githubRepo, {
-      token: this.config.githubToken,
+  forConnected(source: TicketSource, token: string | null): TrackerAdapter {
+    if (source.type !== 'github_issues' || !source.scope || !('githubOwner' in source.scope)) {
+      throw new Error(`No adapter for a ${source.type} ticket source.`);
+    }
+    return new GitHubIssuesAdapter(source.scope.githubOwner, source.scope.githubRepo, {
+      token: token ?? this.config.githubToken,
       apiUrl: this.config.githubApiUrl,
+      sourceId: source.id,
+      loginCache: this.loginCache,
     });
   }
+}
+
+function githubState(category: NonNullable<TicketQuery['category']>): GitHubState | null {
+  if (category === 'in_progress') return null;
+  if (category === 'done') return 'closed';
+  return category === 'all' ? 'all' : 'open';
 }
 
 function hasNextPage(response: Response): boolean {
