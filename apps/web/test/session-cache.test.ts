@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@slop-control/shared';
 import { applySessionUpdate, keys, refetchSessionQueries } from '../src/lib/session-cache';
 
-const session = (id: string, status: Session['status'], ticketKey = 'acme/widgets#1') =>
-  ({ id, status, ticketKey, workspaceId: 'w1' }) as Session;
+const session = (
+  id: string,
+  status: Session['status'],
+  ticketKey = 'acme/widgets#1',
+  ticketSourceId = 's1',
+) => ({ id, status, ticketKey, ticketSourceId, workspaceId: 'w1' }) as Session;
 
 describe('session cache', () => {
   let client: QueryClient;
@@ -19,7 +23,7 @@ describe('session cache', () => {
   });
 
   it("replaces the session in place in its ticket's list", () => {
-    const key = keys.ticketSessions('w1', 'acme/widgets#1');
+    const key = keys.ticketSessions('w1', 's1', 'acme/widgets#1');
     client.setQueryData(key, [session('b', 'running'), session('a', 'running')]);
     applySessionUpdate(client, session('a', 'ended'));
     expect(client.getQueryData<Session[]>(key)!.map((s) => [s.id, s.status])).toEqual([
@@ -29,28 +33,97 @@ describe('session cache', () => {
   });
 
   it("adds a new session to the top of its ticket's list", () => {
-    const key = keys.ticketSessions('w1', 'acme/widgets#1');
+    const key = keys.ticketSessions('w1', 's1', 'acme/widgets#1');
     client.setQueryData(key, [session('a', 'ended')]);
     applySessionUpdate(client, session('b', 'starting'));
     expect(client.getQueryData<Session[]>(key)!.map((s) => s.id)).toEqual(['b', 'a']);
   });
 
   it("leaves another ticket's list alone", () => {
-    const other = keys.ticketSessions('w1', 'acme/widgets#2');
+    const other = keys.ticketSessions('w1', 's1', 'acme/widgets#2');
     client.setQueryData(other, []);
     applySessionUpdate(client, session('a', 'running'));
     expect(client.getQueryData(other)).toEqual([]);
   });
 
+  it('keeps the same key in two sources apart', () => {
+    const builtIn = keys.ticketSessions('w1', 's1', 'T-1');
+    const other = keys.ticketSessions('w1', 's2', 'T-1');
+    client.setQueryData(builtIn, []);
+    client.setQueryData(other, []);
+    applySessionUpdate(client, session('a', 'running', 'T-1', 's2'));
+    expect(client.getQueryData(builtIn)).toEqual([]);
+    expect(client.getQueryData<Session[]>(other)!.map((s) => s.id)).toEqual(['a']);
+  });
+
+  it("refetches the launch preview of the session's ticket, and no other ticket's", () => {
+    const mine = keys.launchPreview('w1', 's1', 'acme/widgets#1', '', '');
+    const minePlanning = keys.launchPreview('w1', 's1', 'acme/widgets#1', 'planning', 'r1');
+    const otherTicket = keys.launchPreview('w1', 's1', 'acme/widgets#2', '', '');
+    const otherSource = keys.launchPreview('w1', 's2', 'acme/widgets#1', '', '');
+    for (const key of [mine, minePlanning, otherTicket, otherSource]) {
+      client.setQueryData(key, { phase: 'investigation' });
+    }
+
+    applySessionUpdate(client, { ...session('a', 'ended'), artifactStatus: 'complete' });
+
+    const stale = (key: readonly unknown[]) => client.getQueryState(key)?.isInvalidated;
+    expect(stale(mine)).toBe(true);
+    expect(stale(minePlanning)).toBe(true);
+    expect(stale(otherTicket)).toBe(false);
+    expect(stale(otherSource)).toBe(false);
+  });
+
   it('does not create a list nobody has loaded', () => {
     applySessionUpdate(client, session('a', 'running'));
-    expect(client.getQueryData(keys.ticketSessions('w1', 'acme/widgets#1'))).toBeUndefined();
+    expect(client.getQueryData(keys.ticketSessions('w1', 's1', 'acme/widgets#1'))).toBeUndefined();
   });
 
   it('refreshes an artifact query once the session has an artifact status', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     applySessionUpdate(client, { ...session('a', 'ended'), artifactStatus: 'complete' });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: keys.artifact('w1', 'a') });
+  });
+
+  describe('an update that is older than the cached session', () => {
+    const inRound = (round: number, status: Session['status']) => ({
+      ...session('a', status),
+      round,
+    });
+    const sessionKey = keys.session('w1', 'a');
+    const listKey = keys.ticketSessions('w1', 's1', 'acme/widgets#1');
+
+    it('is dropped, as when a stop answer arrives after the stopped frame', () => {
+      client.setQueryData(listKey, [inRound(3, 'running')]);
+      applySessionUpdate(client, inRound(3, 'stopped'));
+      const preview = keys.launchPreview('w1', 's1', 'acme/widgets#1', '', '');
+      client.setQueryData(preview, { phase: 'investigation' });
+
+      applySessionUpdate(client, inRound(3, 'running'));
+
+      expect(client.getQueryData(sessionKey)).toMatchObject({ status: 'stopped' });
+      expect(client.getQueryData<Session[]>(listKey)!.map((s) => s.status)).toEqual(['stopped']);
+      expect(client.getQueryState(preview)?.isInvalidated).toBe(false);
+    });
+
+    it('is dropped when only the ticket list holds the newer state', () => {
+      client.setQueryData(listKey, [inRound(1, 'stopped')]);
+      applySessionUpdate(client, inRound(1, 'running'));
+      expect(client.getQueryData<Session[]>(listKey)!.map((s) => s.status)).toEqual(['stopped']);
+      expect(client.getQueryData(sessionKey)).toBeUndefined();
+    });
+
+    it('does not cover an update at the same position', () => {
+      applySessionUpdate(client, inRound(1, 'stopped'));
+      applySessionUpdate(client, { ...inRound(1, 'stopped'), worktreeRemovedAt: '2026-11-11' });
+      expect(client.getQueryData(sessionKey)).toMatchObject({ worktreeRemovedAt: '2026-11-11' });
+    });
+
+    it('does not cover the next round starting', () => {
+      applySessionUpdate(client, inRound(1, 'stopped'));
+      applySessionUpdate(client, inRound(2, 'running'));
+      expect(client.getQueryData(sessionKey)).toMatchObject({ status: 'running', round: 2 });
+    });
   });
 
   it("refetches only this workspace's session queries after a reconnect", async () => {

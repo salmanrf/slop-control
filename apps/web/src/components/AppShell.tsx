@@ -1,6 +1,6 @@
 import { Menu, Portal } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, Outlet, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, Outlet, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { api } from '../lib/app-api';
 import { keys } from '../lib/session-cache';
 import { initials } from '../lib/session-view';
@@ -20,6 +20,9 @@ const STREAM_STATUS: Record<StreamState, { dot: string; label: string }> = {
 
 const NAV_LINK =
   'flex min-h-11 items-center gap-2.5 rounded-lg px-3 py-2.5 no-underline hover:text-white';
+
+const NAV_ACTIVE = 'bg-nav-active font-medium text-white';
+const NAV_IDLE = 'text-nav-soft';
 
 /** Every view inside a workspace shares this frame and its one status stream. */
 export function WorkspaceLayout() {
@@ -46,6 +49,12 @@ function WorkspaceNav({
   streamState: StreamState;
 }) {
   const status = STREAM_STATUS[streamState];
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const section = pathname.endsWith('/phase-setups')
+    ? 'phase-setups'
+    : pathname.endsWith('/sources')
+      ? 'sources'
+      : 'tickets';
   return (
     <nav
       aria-label="Main"
@@ -56,7 +65,8 @@ function WorkspaceNav({
       <Link
         to="/w/$workspaceId"
         params={{ workspaceId }}
-        className={cx(NAV_LINK, 'bg-nav-active font-medium text-white')}
+        aria-current={section === 'tickets' ? 'page' : undefined}
+        className={cx(NAV_LINK, section === 'tickets' ? NAV_ACTIVE : NAV_IDLE)}
       >
         <svg
           aria-hidden="true"
@@ -71,6 +81,50 @@ function WorkspaceNav({
           <path d="M5 7h6M5 10h4" />
         </svg>
         Tickets
+      </Link>
+      <Link
+        to="/w/$workspaceId/sources"
+        params={{ workspaceId }}
+        aria-current={section === 'sources' ? 'page' : undefined}
+        className={cx(NAV_LINK, section === 'sources' ? NAV_ACTIVE : NAV_IDLE)}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <circle cx="4" cy="8" r="2" />
+          <circle cx="12" cy="4" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <path d="M6 7l4-2M6 9l4 2" />
+        </svg>
+        Ticket sources
+      </Link>
+      <Link
+        to="/w/$workspaceId/phase-setups"
+        params={{ workspaceId }}
+        aria-current={section === 'phase-setups' ? 'page' : undefined}
+        className={cx(NAV_LINK, section === 'phase-setups' ? NAV_ACTIVE : NAV_IDLE)}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <path d="M3 4h10M3 8h10M3 12h10" />
+          <circle cx="6" cy="4" r="1.5" fill="currentColor" />
+          <circle cx="10" cy="8" r="1.5" fill="currentColor" />
+          <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+        </svg>
+        Phase setups
       </Link>
       <div className="grow" />
       <Link to="/" className={cx(NAV_LINK, 'text-[13px] text-nav-muted')}>

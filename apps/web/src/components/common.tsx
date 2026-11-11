@@ -1,6 +1,23 @@
-import { Alert, Button, Clipboard, Field, Input, type ButtonProps } from '@chakra-ui/react';
+import {
+  Alert,
+  Button,
+  Clipboard,
+  Field,
+  Input,
+  NativeSelect,
+  Textarea,
+  type ButtonProps,
+} from '@chakra-ui/react';
 import type { Phase, Session } from '@slop-control/shared';
-import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
+import {
+  useEffect,
+  useState,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react';
+import { errorText } from '../lib/error-text';
 import { sessionOutcome, phaseLabel, type Tone } from '../lib/session-view';
 
 export const cx = (...names: (string | false | null | undefined)[]) =>
@@ -87,7 +104,7 @@ export function InfoIcon() {
 
 export function ErrorMessage({ error }: { error: unknown }) {
   if (!error) return null;
-  const message = error instanceof Error ? error.message : 'Something went wrong.';
+  const message = errorText(error);
   return (
     <Alert.Root
       unstyled
@@ -271,6 +288,56 @@ export function LabeledInput({ label, mono, className, ...props }: LabeledInputP
     <Field.Root className={cx('flex flex-col items-stretch gap-1.5', className)}>
       <Field.Label className="text-[12px] font-semibold text-muted">{label}</Field.Label>
       <TextInput mono={mono} {...props} />
+    </Field.Root>
+  );
+}
+
+interface LabeledTextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label: ReactNode;
+  mono?: boolean;
+}
+
+export function LabeledTextArea({ label, mono, className, ...props }: LabeledTextAreaProps) {
+  return (
+    <Field.Root className={cx('flex flex-col items-stretch gap-1.5', className)}>
+      <Field.Label className="text-[12px] font-semibold text-muted">{label}</Field.Label>
+      <Textarea
+        unstyled
+        className={cx(
+          'min-h-24 w-full rounded-lg border border-field bg-white px-3 py-2.5 outline-accent focus-visible:outline-2',
+          mono && 'font-mono text-[13px]',
+        )}
+        {...props}
+      />
+    </Field.Root>
+  );
+}
+
+interface LabeledSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
+  label: ReactNode;
+  /** For a select on the dark launch card. */
+  dark?: boolean;
+}
+
+export function LabeledSelect({ label, dark, className, children, ...props }: LabeledSelectProps) {
+  return (
+    <Field.Root className={cx('flex flex-col items-stretch gap-1.5', className)}>
+      <Field.Label
+        className={cx('text-[12px]', dark ? 'text-nav-muted' : 'font-semibold text-muted')}
+      >
+        {label}
+      </Field.Label>
+      <NativeSelect.Root unstyled>
+        <NativeSelect.Field
+          className={cx(
+            'min-h-11 w-full cursor-pointer rounded-lg border px-2.5 py-2 text-[13px]',
+            dark ? 'border-nav-line bg-nav-raised text-nav-text' : 'border-field bg-white',
+          )}
+          {...props}
+        >
+          {children}
+        </NativeSelect.Field>
+      </NativeSelect.Root>
     </Field.Root>
   );
 }
