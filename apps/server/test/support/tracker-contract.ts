@@ -2,6 +2,8 @@ import type { StatusCategory, TicketSummary } from '@slop-control/shared';
 import {
   TICKET_PAGE_SIZE,
   TicketNotFoundError,
+  TrackerAuthError,
+  TransitionNotAllowedError,
   type TrackerAdapter,
 } from '../../src/tickets/tracker';
 
@@ -25,6 +27,10 @@ export interface TrackerContractDriver {
    * @return an adapter for a tracker that holds exactly these tickets
    */
   seed(seeds: SeedTicket[]): Promise<TrackerAdapter>;
+  /** The comments the tracker holds for a ticket, oldest first. */
+  comments(key: string): Promise<string[]>;
+  /** An adapter for the same tracker whose credential the tracker rejects; absent where there is none to reject. */
+  rejected?(): Promise<TrackerAdapter>;
   close?(): Promise<void>;
 }
 
@@ -150,6 +156,68 @@ export function describeTrackerContract(
 
     it('throws TicketNotFoundError for a ticket it does not hold', async () => {
       await expect(adapter.get(driver.missingKey)).rejects.toBeInstanceOf(TicketNotFoundError);
+    });
+
+    // The writes come last, so the lists above see the tickets as they were seeded.
+    const needle = async () => (await adapter.list({ search: 'needle', mine: false })).items[0]!;
+
+    it('adds a comment to a ticket', async () => {
+      const { key } = await needle();
+      const result = await adapter.addComment(key, 'A **review** in markdown.');
+      expect(result.url === null || typeof result.url === 'string').toBe(true);
+      expect(await driver.comments(key)).toEqual(['A **review** in markdown.']);
+    });
+
+    it('lists the statuses a ticket can move to, leaving out its current one', async () => {
+      const ticket = await needle();
+      const transitions = await adapter.listTransitions(ticket.key);
+      expect(transitions.length).toBeGreaterThan(0);
+      expect(transitions.map((item) => item.status)).not.toContain(ticket.status);
+      for (const item of transitions) {
+        expect(['open', 'in_progress', 'done']).toContain(item.category);
+      }
+    });
+
+    it('moves a ticket to one of those statuses, and reads it back there', async () => {
+      const { key } = await needle();
+      const target = (await adapter.listTransitions(key)).find((item) => item.category === 'done')!;
+      const moved = await adapter.transition(key, target.status);
+      expect(moved).toMatchObject({ key, status: target.status, statusCategory: 'done' });
+      expect(await adapter.get(key)).toMatchObject({ status: target.status });
+      expect((await adapter.listTransitions(key)).map((item) => item.status)).not.toContain(
+        target.status,
+      );
+    });
+
+    it("throws TransitionNotAllowedError for a status the ticket can't move to", async () => {
+      const [summary] = (await adapter.list({ search: 'Open ticket 1', mine: false })).items;
+      await expect(adapter.transition(summary!.key, 'No such status')).rejects.toBeInstanceOf(
+        TransitionNotAllowedError,
+      );
+      await expect(adapter.transition(summary!.key, summary!.status)).rejects.toBeInstanceOf(
+        TransitionNotAllowedError,
+      );
+      expect(await adapter.get(summary!.key)).toMatchObject({ status: summary!.status });
+    });
+
+    it('throws TicketNotFoundError for a write to a ticket it does not hold', async () => {
+      const { missingKey } = driver;
+      await expect(adapter.addComment(missingKey, 'x')).rejects.toBeInstanceOf(TicketNotFoundError);
+      await expect(adapter.listTransitions(missingKey)).rejects.toBeInstanceOf(TicketNotFoundError);
+      await expect(adapter.transition(missingKey, 'x')).rejects.toBeInstanceOf(TicketNotFoundError);
+    });
+
+    it('throws TrackerAuthError for a write with a rejected credential, and writes nothing', async () => {
+      if (!driver.rejected) return;
+      const [summary] = (await adapter.list({ search: 'Open ticket 2', mine: false })).items;
+      const refused = await driver.rejected();
+      await expect(refused.addComment(summary!.key, 'never posted')).rejects.toBeInstanceOf(
+        TrackerAuthError,
+      );
+      await expect(refused.transition(summary!.key, 'closed')).rejects.toBeInstanceOf(
+        TrackerAuthError,
+      );
+      expect(await driver.comments(summary!.key)).toEqual([]);
     });
   });
 }

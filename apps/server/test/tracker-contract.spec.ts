@@ -1,4 +1,5 @@
-import type { TicketSource } from '@slop-control/shared';
+import type { BuiltInTicketComment, TicketSource } from '@slop-control/shared';
+import { TrackerAuthError } from '../src/tickets/tracker';
 import { BuiltInTracker } from '../src/tickets/built-in-tracker';
 import { GitHubIssuesAdapter } from '../src/tickets/github-issues.adapter';
 import { FakeTracker, ticket } from './support/fake-tracker';
@@ -25,7 +26,23 @@ describeTrackerContract('GitHub Issues over stubbed HTTP', async () => {
         state: seed.category === 'done' ? 'closed' : 'open',
         updated_at: updatedAt(index),
       }));
-      return new GitHubIssuesAdapter('acme', 'widgets', { token: '', apiUrl, sourceId: SOURCE_ID });
+      return new GitHubIssuesAdapter('acme', 'widgets', {
+        token: 'ghp_contract_token',
+        apiUrl,
+        sourceId: SOURCE_ID,
+      });
+    },
+    comments: async (key) =>
+      stub.comments
+        .filter((comment) => `acme/widgets#${comment.issue}` === key)
+        .map((comment) => comment.body),
+    rejected: async () => {
+      stub.requiredToken = 'ghp_contract_token';
+      return new GitHubIssuesAdapter('acme', 'widgets', {
+        token: 'ghp_a_revoked_token',
+        apiUrl,
+        sourceId: SOURCE_ID,
+      });
     },
     close: () => stub.stop(),
   };
@@ -57,9 +74,16 @@ describeTrackerContract('the built-in tracker', async () => {
       }
       return t.app.get(BuiltInTracker).adapterFor(source);
     },
+    comments: async (key) =>
+      (
+        (await t.api.get(`/workspaces/${workspaceId}/built-in-tickets/${key}/comments`))
+          .body as BuiltInTicketComment[]
+      ).map((comment) => comment.body),
     close: () => t.close(),
   };
 });
+
+let held = new FakeTracker();
 
 describeTrackerContract('FakeTracker', async () => ({
   sourceId: SOURCE_ID,
@@ -67,6 +91,7 @@ describeTrackerContract('FakeTracker', async () => ({
   missingKey: 'acme/widgets#9999',
   seed: async (seeds) => {
     const tracker = new FakeTracker();
+    held = tracker;
     tracker.add(
       ...seeds.map((seed, index) =>
         ticket(`acme/widgets#${index + 1}`, {
@@ -79,5 +104,16 @@ describeTrackerContract('FakeTracker', async () => ({
       ),
     );
     return tracker.source().adapter(SOURCE_ID);
+  },
+  comments: async (key) =>
+    held
+      .source()
+      .comments.filter((comment) => comment.key === key)
+      .map((comment) => comment.body),
+  rejected: async () => {
+    const refusing = new FakeTracker();
+    refusing.add(...held.tickets.values());
+    refusing.source().writeFailure = new TrackerAuthError('rejected');
+    return refusing.source().adapter(SOURCE_ID);
   },
 }));

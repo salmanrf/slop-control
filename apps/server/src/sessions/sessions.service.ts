@@ -11,6 +11,7 @@ import type {
   ScopeFlag,
   Session,
   SessionArtifact,
+  SessionDiff,
   SessionSetup,
   TicketSource,
 } from '@slop-control/shared';
@@ -21,14 +22,17 @@ import { AppConfig } from '../config';
 import { ApiException, notFound, validationFailed } from '../common/api-exception';
 import { Redactor } from '../common/redactor';
 import { isUuid } from '../common/uuid';
+import { DraftedActionsService } from '../drafted-actions/drafted-actions.service';
 import { LAUNCHABLE_PHASES, isLaunchablePhase } from '../phase-setups/phase-defaults';
 import { PhaseSetupsService, toSessionSetup } from '../phase-setups/phase-setups.service';
 import { TicketSourcesService, sourceDisconnected } from '../tickets/ticket-sources.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import {
+  BranchNotFoundError,
   WorktreeCreateError,
   WorktreeDirtyError,
+  WorktreeFetchError,
   WorktreeManager,
 } from '../worktrees/worktree-manager';
 import { readArtifact } from './artifact-reader';
@@ -57,6 +61,8 @@ interface LaunchResolution {
   /** Null when the developer must choose a repo. */
   repo: LinkedRepo | null;
   baseRef: string | null;
+  /** The branch on `origin` that `baseRef` follows; null when the base is a local branch. */
+  fetchBranch: string | null;
   compareRef: string | null;
   setup: SessionSetup;
   given: GivenArtifact[];
@@ -82,6 +88,7 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
     private readonly sources: TicketSourcesService,
     private readonly tickets: TicketsService,
     private readonly phaseSetups: PhaseSetupsService,
+    private readonly drafts: DraftedActionsService,
     private readonly redactor: Redactor,
     private readonly config: AppConfig,
   ) {}
@@ -108,6 +115,8 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
   /** Leaves rows as they are, so the next boot records them as interrupted. */
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    // The stream lives in another module, which shuts down only after the wait below.
+    this.updates.close();
     await Promise.allSettled([...this.handles.values()].map((handle) => handle.stop()));
     let timer: NodeJS.Timeout | undefined;
     const grace = new Promise((resolve) => (timer = setTimeout(resolve, SHUTDOWN_GRACE_MS)));
@@ -118,7 +127,7 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
   /**
    * @params workspaceId: the workspace; sourceId: the ticket's source; ticketKey: the ticket; body: the phase and optional repo
    * @return the session, or throws an ApiException listed under the start endpoint
-   * Resolves the repo, phase setup, starting point, and earlier artifacts, creates the worktree, and starts the runtime without waiting for it.
+   * Resolves the repo, phase setup, starting point, and earlier artifacts, fetches the base when it's the default branch, creates the worktree, and starts the runtime without waiting for it. A failed fetch is recorded on the session and doesn't stop the launch.
    */
   async start(
     workspaceId: string,
@@ -150,6 +159,9 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
       );
     }
     const ticket = await this.tickets.read(source, ticketKey);
+
+    const baseFetchFailed =
+      resolved.fetchBranch !== null && !(await this.fetchBase(repo, resolved.fetchBranch));
 
     const id = randomUUID();
     const worktree = await this.createWorktree({
@@ -188,6 +200,7 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
       branch: worktree.branch,
       baseRef,
       baseCommit: worktree.baseCommit,
+      baseFetchFailed,
       inputArtifacts,
     });
     this.updates.publish(session);
@@ -296,6 +309,31 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
     const artifact = await this.store.latestArtifact(sessionId);
     if (!artifact) throw notFound('This session has no stored artifact.');
     return artifact;
+  }
+
+  /**
+   * @params workspaceId: the workspace; sessionId: one of its sessions
+   * @return the session's committed changes against the commit it started from, and its uncommitted files; or throws NOT_FOUND
+   * Reads a session's diff from the linked clone.
+   */
+  async diff(workspaceId: string, sessionId: string): Promise<SessionDiff> {
+    const session = await this.get(workspaceId, sessionId);
+    const repo = await this.workspaces.getRepo(workspaceId, session.linkedRepoId);
+    try {
+      // A session from before its starting commit was recorded is compared with where it left its base.
+      const baseCommit =
+        session.baseCommit ??
+        (await this.worktrees.mergeBase(repo.localPath, session.baseRef, session.branch));
+      const [state, diff, uncommitted] = await Promise.all([
+        this.worktrees.branchState(repo.localPath, session.branch, baseCommit),
+        this.worktrees.diff(repo.localPath, baseCommit, session.branch),
+        session.worktreeRemovedAt ? null : this.worktrees.uncommitted(session.worktreePath),
+      ]);
+      return { baseCommit, ...state, ...diff, uncommitted };
+    } catch (error) {
+      if (error instanceof BranchNotFoundError) throw notFound(error.message);
+      throw error;
+    }
   }
 
   /**
@@ -410,10 +448,24 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
       suggestion,
       repo,
       baseRef: repo ? (implementation?.branch ?? `origin/${repo.defaultBranch}`) : null,
+      // An implementation branch is local, so there is nothing to fetch for it.
+      fetchBranch: repo && !implementation ? repo.defaultBranch : null,
       compareRef: implementation?.baseRef ?? null,
       setup,
       given,
     };
+  }
+
+  /** Run by the server, never by the session, which stays cut off from the remote. False if the base may be behind. */
+  private async fetchBase(repo: LinkedRepo, branch: string): Promise<boolean> {
+    try {
+      await this.worktrees.fetch(repo.localPath, branch);
+      return true;
+    } catch (error) {
+      if (!(error instanceof WorktreeFetchError)) throw error;
+      this.logger.warn(`Starting from ${branch} as it is: ${this.describe(error)}`);
+      return false;
+    }
   }
 
   private async createWorktree(input: Parameters<WorktreeManager['create']>[0]) {
@@ -506,7 +558,7 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
     else await this.finish(session, 'failed', event.message ?? 'The runtime reported an error.');
   }
 
-  /** Stores the artifact first, then the final status and any scope flag, and publishes last. */
+  /** Stores the artifact first, then the final status and any scope flag, publishes, and drafts what follows from the round. */
   private async finish(
     session: Session,
     status: SessionEnd['status'],
@@ -522,7 +574,9 @@ export class SessionsService implements OnApplicationBootstrap, OnModuleDestroy 
       artifactStatus: produced ? 'complete' : 'incomplete',
       scopeFlags: await this.scopeFlags(session),
     });
-    if (updated) this.updates.publish(updated);
+    if (!updated) return;
+    this.updates.publish(updated);
+    await this.drafts.draftForRound(updated);
   }
 
   /**

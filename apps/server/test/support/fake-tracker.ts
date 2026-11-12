@@ -1,9 +1,16 @@
-import type { Ticket, TicketPage, TicketQuery, TicketSource } from '@slop-control/shared';
+import type {
+  StatusCategory,
+  Ticket,
+  TicketPage,
+  TicketQuery,
+  TicketSource,
+} from '@slop-control/shared';
 import {
   TICKET_PAGE_SIZE,
   TicketNotFoundError,
   TrackerAdapter,
   TrackerAdapterFactory,
+  TransitionNotAllowedError,
 } from '../../src/tickets/tracker';
 
 /** A ticket as a connected tracker holds it. The adapter stamps the real source ID when it's read. */
@@ -28,18 +35,57 @@ export class FakeSourceTracker {
   failure: Error | null = null;
   /** Thrown by `verify`. */
   verifyFailure: Error | null = null;
+  /** Thrown by `addComment` and `transition`. */
+  writeFailure: Error | null = null;
+  /** Every comment an approved action posted. */
+  readonly comments: { key: string; body: string }[] = [];
+  /** Every status change an approved action made. */
+  readonly moves: { key: string; toStatus: string }[] = [];
+  /** The statuses a ticket can be in, by name. A ticket can move to any other one. */
+  statuses: Record<string, StatusCategory> = { open: 'open', closed: 'done' };
   /** What `list` reports; false stands for a source that couldn't limit tickets to the developer. */
   mineApplied = true;
   pageSize = TICKET_PAGE_SIZE;
   lastQuery: TicketQuery | null = null;
   calls = { verify: 0, list: 0, get: 0 };
+  /** The credential the latest adapter was built with. */
+  lastToken: string | null = null;
 
   add(...tickets: Ticket[]): void {
     for (const item of tickets) this.tickets.set(item.key, item);
   }
 
   adapter(sourceId: string): TrackerAdapter {
+    const held = (key: string): Ticket => {
+      if (this.failure) throw this.failure;
+      const found = this.tickets.get(key);
+      if (!found) throw new TicketNotFoundError(`No ticket ${key}`);
+      return found;
+    };
+    const transitions = (current: string) =>
+      Object.entries(this.statuses)
+        .filter(([status]) => status !== current)
+        .map(([status, category]) => ({ status, category }));
     return {
+      addComment: async (key, body) => {
+        held(key);
+        if (this.writeFailure) throw this.writeFailure;
+        this.comments.push({ key, body });
+        return {
+          url: `https://tracker.invalid/${encodeURIComponent(key)}#comment-${this.comments.length}`,
+        };
+      },
+      listTransitions: async (key) => transitions(held(key).status),
+      transition: async (key, toStatus) => {
+        const current = held(key);
+        if (this.writeFailure) throw this.writeFailure;
+        const target = transitions(current.status).find((item) => item.status === toStatus);
+        if (!target) throw new TransitionNotAllowedError(`${key} can't move to "${toStatus}".`);
+        const moved = { ...current, status: target.status, statusCategory: target.category };
+        this.tickets.set(key, moved);
+        this.moves.push({ key, toStatus });
+        return { ...moved, sourceId };
+      },
       verify: async () => {
         this.calls.verify += 1;
         if (this.verifyFailure) throw this.verifyFailure;
@@ -100,9 +146,11 @@ export class FakeTracker extends TrackerAdapterFactory {
     return tracker;
   }
 
-  forConnected(source: TicketSource): TrackerAdapter {
+  forConnected(source: TicketSource, token: string | null): TrackerAdapter {
     this.lastSource = source;
-    return this.source(source.label).adapter(source.id);
+    const tracker = this.source(source.label);
+    tracker.lastToken = token;
+    return tracker.adapter(source.id);
   }
 
   /** Forgets every source's tickets and failures. */

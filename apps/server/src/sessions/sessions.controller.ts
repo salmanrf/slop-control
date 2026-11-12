@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
-import type { LaunchPreview, Session, SessionArtifact } from '@slop-control/shared';
+import type { LaunchPreview, Session, SessionArtifact, SessionDiff } from '@slop-control/shared';
 import type { Response } from 'express';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { SessionUpdates } from './session-updates';
@@ -73,6 +73,14 @@ export class SessionsController {
     @Param('sessionId') sessionId: string,
   ): Promise<SessionArtifact> {
     return this.sessions.artifact(workspaceId, sessionId);
+  }
+
+  @Get('sessions/:sessionId/diff')
+  diff(
+    @Param('workspaceId') workspaceId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<SessionDiff> {
+    return this.sessions.diff(workspaceId, sessionId);
   }
 
   @Post('sessions/:sessionId/messages')

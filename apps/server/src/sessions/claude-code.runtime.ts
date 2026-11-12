@@ -10,7 +10,7 @@ import type {
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { AppConfig } from '../config';
+import { Redactor } from '../common/redactor';
 import {
   BASELINE_ENV,
   baselineScopeOptions,
@@ -32,6 +32,13 @@ export interface ClaudeCodeDeps {
   loadQuery: () => Promise<SdkQuery>;
   /** Null if this host can enforce the baseline scope, or what's missing. Defaults to checking the host. */
   checkScopeEnforcement?: () => Promise<string | null>;
+  /**
+   * Leaves the baseline scope off. It exists only for the smoke test's control run, which has to
+   * show that an unprotected push is detected at all. Only a test that builds the runtime itself
+   * can set it: no setting, environment variable, request, or phase setup reaches these options,
+   * and the runtime Nest wires is given none of them.
+   */
+  baselineScope?: 'off';
 }
 
 export const CLAUDE_CODE_DEPS = Symbol('CLAUDE_CODE_DEPS');
@@ -87,7 +94,7 @@ export class ClaudeCodeRuntime extends SessionRuntime {
   private readonly deps: ClaudeCodeDeps;
 
   constructor(
-    @Inject(AppConfig) private readonly config: Pick<AppConfig, 'githubToken'>,
+    @Inject(Redactor) private readonly secrets: Pick<Redactor, 'holdsSecret'>,
     @Optional() @Inject(CLAUDE_CODE_DEPS) deps?: ClaudeCodeDeps,
   ) {
     super();
@@ -173,10 +180,12 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     extra: Record<string, unknown>,
     abortController: AbortController,
   ): Promise<Record<string, unknown>> {
+    // Always on, except in the smoke test's control run. See `ClaudeCodeDeps.baselineScope`.
+    const scopeOn = this.deps.baselineScope !== 'off';
     return {
       ...extra,
       cwd,
-      env: { ...this.childEnv(), ...BASELINE_ENV },
+      env: scopeOn ? { ...this.childEnv(), ...BASELINE_ENV } : this.childEnv(),
       abortController,
       permissionMode: 'auto',
       // Nobody is watching: anything that would prompt is denied, and the agent carries on.
@@ -184,7 +193,7 @@ export class ClaudeCodeRuntime extends SessionRuntime {
       disallowedTools: ['AskUserQuestion'],
       // The project source carries the repo's `.claude/` and `CLAUDE.md`, and is always on.
       settingSources: setup.userLevelSource ? ['user', 'project', 'local'] : ['project', 'local'],
-      ...baselineScopeOptions(await gitCommonDir(cwd)),
+      ...(scopeOn ? baselineScopeOptions(await gitCommonDir(cwd)) : {}),
     };
   }
 
@@ -287,7 +296,10 @@ export class ClaudeCodeRuntime extends SessionRuntime {
     });
   }
 
-  /** Enough to run with the host's setup, and nothing holding the workspace's credentials (NFR-4). */
+  /**
+   * Enough to run with the host's setup, and nothing holding the workspace's credentials (NFR-4).
+   * The server's secret key is never on the allow list, and a value holding a stored secret is dropped.
+   */
   private childEnv(): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [name, value] of Object.entries(process.env)) {
@@ -296,8 +308,7 @@ export class ClaudeCodeRuntime extends SessionRuntime {
         ALLOWED_ENV.has(name) ||
         ALLOWED_CLAUDE_ENV.has(name) ||
         ALLOWED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
-      const holdsSecret = this.config.githubToken !== '' && value.includes(this.config.githubToken);
-      if (allowed && !holdsSecret) env[name] = value;
+      if (allowed && !this.secrets.holdsSecret(value)) env[name] = value;
     }
     return env;
   }

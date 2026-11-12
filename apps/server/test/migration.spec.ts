@@ -403,6 +403,32 @@ describe('upgrading from the Sprint 1 schema', () => {
     expect(beta.body.markdown).toBe('# Beta findings');
   });
 
+  it('gives nobody a credential, marks no base fetch as failed, and drafts nothing (MG-08)', async () => {
+    const sources = (await h.api.get(`/workspaces/${ALPHA}/sources`)).body as TicketSource[];
+    expect(sources.length).toBeGreaterThan(1);
+    for (const source of sources) {
+      expect(source.hasCredential).toBe(false);
+      expect(source.credential).toEqual({
+        isSet: false,
+        state: null,
+        login: null,
+        message: null,
+        checkedAt: null,
+      });
+    }
+    expect((await h.api.get(`/workspaces/${ALPHA}/github-credential`)).body).toMatchObject({
+      isSet: false,
+      repos: [],
+    });
+    expect((await session(SESSION.ended)).baseFetchFailed).toBe(false);
+    expect((await session(SESSION.beta, BETA)).baseFetchFailed).toBe(false);
+    expect((await h.api.get(`/workspaces/${ALPHA}/drafted-actions`)).body).toEqual([]);
+    const actions = await h.api.get(
+      `/workspaces/${ALPHA}/sessions/${SESSION.ended}/drafted-actions`,
+    );
+    expect(actions.body).toEqual([]);
+  });
+
   it("keeps one workspace's old sessions out of another", async () => {
     expect((await h.api.get(`/workspaces/${BETA}/sessions/${SESSION.ended}`)).status).toBe(404);
   });

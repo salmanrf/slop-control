@@ -10,6 +10,7 @@ import type {
   SessionSetup,
   SessionStatus,
 } from '@slop-control/shared';
+import { isUuid } from '../common/uuid';
 import { Database } from '../db/database';
 
 interface SessionRow {
@@ -29,6 +30,7 @@ interface SessionRow {
   branch: string;
   base_ref: string;
   base_commit: string | null;
+  base_fetch_failed: boolean;
   input_artifacts: InputArtifact[];
   scope_flags: ScopeFlag[];
   worktree_removed_at: Date | null;
@@ -61,6 +63,7 @@ export interface NewSession {
   branch: string;
   baseRef: string;
   baseCommit: string;
+  baseFetchFailed: boolean;
   inputArtifacts: InputArtifact[];
 }
 
@@ -92,8 +95,9 @@ export class SessionStore {
     const { rows } = await this.db.query<SessionRow>(
       `insert into session
          (id, workspace_id, linked_repo_id, ticket_source_id, ticket_key, ticket_title, phase,
-          status, brief, setup, worktree_path, branch, base_ref, base_commit, input_artifacts)
-       values ($1, $2, $3, $4, $5, $6, $7, 'starting', $8, $9, $10, $11, $12, $13, $14)
+          status, brief, setup, worktree_path, branch, base_ref, base_commit, input_artifacts,
+          base_fetch_failed)
+       values ($1, $2, $3, $4, $5, $6, $7, 'starting', $8, $9, $10, $11, $12, $13, $14, $15)
        returning *`,
       [
         session.id,
@@ -110,6 +114,7 @@ export class SessionStore {
         session.baseRef,
         session.baseCommit,
         JSON.stringify(session.inputArtifacts),
+        session.baseFetchFailed,
       ],
     );
     return toSession(rows[0]!);
@@ -136,6 +141,12 @@ export class SessionStore {
       [workspaceId, sourceId, ticketKey],
     );
     return rows.map(toSession);
+  }
+
+  /** Like `find`, for IDs that came from a URL and may not be UUIDs at all. */
+  async findScoped(workspaceId: string, sessionId: string): Promise<Session | null> {
+    if (!isUuid(workspaceId) || !isUuid(sessionId)) return null;
+    return this.find(workspaceId, sessionId);
   }
 
   async listActive(): Promise<Session[]> {
@@ -286,6 +297,7 @@ function toSession(row: SessionRow): Session {
     branch: row.branch,
     baseRef: row.base_ref,
     baseCommit: row.base_commit,
+    baseFetchFailed: row.base_fetch_failed,
     inputArtifacts: row.input_artifacts,
     scopeFlags: row.scope_flags,
     worktreeRemovedAt: row.worktree_removed_at?.toISOString() ?? null,

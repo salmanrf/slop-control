@@ -35,6 +35,12 @@ export type ApiErrorCode =
   | 'BUILT_IN_SOURCE_FIXED'
   | 'BUILT_IN_CREATION_OFF'
   | 'REPO_CHOICE_REQUIRED'
+  | 'SECRETS_NOT_CONFIGURED'
+  | 'CREDENTIAL_REJECTED'
+  | 'CREDENTIAL_NOT_SET'
+  | 'REPO_HOST_UNAVAILABLE'
+  | 'ACTION_ALREADY_DECIDED'
+  | 'ACTION_STALE'
   /** An unexpected server failure; the spec's contract has no code for these. */
   | 'INTERNAL_ERROR';
 
@@ -71,6 +77,36 @@ export interface LinkRepoBody {
   localPath: string;
 }
 
+export type CredentialState = 'ok' | 'auth_failed' | 'unavailable';
+
+/** What the API says about a stored credential. It never includes the token. */
+export interface CredentialStatus {
+  isSet: boolean;
+  /** How the last check went; null when no credential is set. */
+  state: CredentialState | null;
+  /** The GitHub login the token belongs to; null when not set or never accepted. */
+  login: string | null;
+  /** What went wrong at the last check; null when `state` is `ok` or nothing is set. */
+  message: string | null;
+  /** Null when no credential is set. */
+  checkedAt: string | null;
+}
+
+export interface RepoPushAccess {
+  linkedRepoId: string;
+  /** Whether the credential could push to this repo at the last check. */
+  canPush: boolean;
+}
+
+export interface WorkspaceCredentialStatus extends CredentialStatus {
+  /** One entry per linked repo; empty when no credential is set. */
+  repos: RepoPushAccess[];
+}
+
+export interface SetCredentialBody {
+  token: string;
+}
+
 export type TicketSourceType = 'built_in' | 'github_issues' | 'jira';
 
 export type StatusCategory = 'open' | 'in_progress' | 'done';
@@ -88,8 +124,10 @@ export interface TicketSource {
     | { githubOwner: string; githubRepo: string }
     | { jiraSite: string; jiraProject: string; jiraEmail: string }
     | null;
-  /** Always false until stored per-source credentials are built. */
+  /** Same as `credential.isSet`. */
   hasCredential: boolean;
+  /** Always not set for `built_in`. */
+  credential: CredentialStatus;
   defaultLinkedRepoId: string | null;
   /** Only ever true on a `built_in` source with no connected sources alongside it. */
   canCreateTickets: boolean;
@@ -97,7 +135,7 @@ export interface TicketSource {
   createdAt: string;
 }
 
-/** The `jira` type and `token` are in the contract but rejected until they're built. */
+/** The `jira` type is in the contract but rejected until it's built. */
 export type ConnectSourceBody =
   | {
       type: 'github_issues';
@@ -116,8 +154,8 @@ export type ConnectSourceBody =
     };
 
 export interface UpdateSourceBody {
-  /** Rejected until stored per-source credentials are built. */
-  token?: string;
+  /** Replaces the stored credential; null removes it. */
+  token?: string | null;
   /** Null clears it. */
   defaultLinkedRepoId?: string | null;
 }
@@ -294,6 +332,8 @@ export interface Session {
   baseRef: string;
   /** The commit `baseRef` pointed to; null for sessions from before this field existed. */
   baseCommit: string | null;
+  /** True when the base couldn't be fetched before the worktree was created, so it may be behind. */
+  baseFetchFailed: boolean;
   inputArtifacts: InputArtifact[];
   /** Empty unless the session went beyond its scope. */
   scopeFlags: ScopeFlag[];
@@ -377,4 +417,146 @@ export interface CreateWorktreeInput {
   workspaceId: string;
   ticketKey: string;
   sessionId: string;
+}
+
+export type DraftedActionType = 'open_pr' | 'ticket_comment' | 'ticket_transition';
+
+export type DraftedActionStatus = 'pending' | 'rejected' | 'dispatching' | 'succeeded' | 'failed';
+
+export interface OpenPrPayload {
+  title: string;
+  /** Markdown. */
+  body: string;
+  /** The linked repo's default branch. Not editable. */
+  baseBranch: string;
+  /** The session's branch. Not editable. */
+  headBranch: string;
+}
+
+export interface OpenPrResult {
+  number: number;
+  url: string;
+  /** The commit that was pushed. */
+  commit: string;
+}
+
+export interface TicketCommentPayload {
+  /** Markdown. */
+  body: string;
+}
+
+export interface TicketCommentResult {
+  /** Null for a built-in ticket, which has no external page. */
+  url: string | null;
+}
+
+export interface TicketTransitionPayload {
+  /** The tracker's own status name, e.g. `In review`. */
+  toStatus: string;
+}
+
+export interface TicketTransitionResult {
+  /** The ticket's status after the move. */
+  status: string;
+}
+
+export interface DraftedActionBase {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  ticketSourceId: string;
+  ticketKey: string;
+  /** The ticket's title when the session started. */
+  ticketTitle: string;
+  /** The session's phase. */
+  phase: Phase;
+  /** The session round that drafted it, or last redrafted it. */
+  round: number;
+  status: DraftedActionStatus;
+  /** True once the developer has changed the payload; a later round then leaves it alone. */
+  edited: boolean;
+  /** Why the last dispatch failed; null otherwise. */
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** When it was approved or rejected; null while pending. */
+  decidedAt: string | null;
+  /** When the last dispatch finished; null if none has. */
+  dispatchedAt: string | null;
+}
+
+/** `result` is null until the action has succeeded. */
+export type DraftedAction = DraftedActionBase &
+  (
+    | { type: 'open_pr'; payload: OpenPrPayload; result: OpenPrResult | null }
+    | { type: 'ticket_comment'; payload: TicketCommentPayload; result: TicketCommentResult | null }
+    | {
+        type: 'ticket_transition';
+        payload: TicketTransitionPayload;
+        result: TicketTransitionResult | null;
+      }
+  );
+
+/** Only the editable fields of the action's type are accepted. */
+export type UpdateDraftedActionBody =
+  { title?: string; body?: string } | { body?: string } | { toStatus?: string };
+
+export interface ApproveActionBody {
+  /** Required for `open_pr`: the head commit the developer was shown. */
+  expectedHeadCommit?: string;
+}
+
+export interface TicketTransition {
+  /** The tracker's own status name. */
+  status: string;
+  category: StatusCategory;
+}
+
+export type DiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+export interface DiffFile {
+  path: string;
+  /** Set when `status` is `renamed`; null otherwise. */
+  previousPath: string | null;
+  status: DiffFileStatus;
+  /** Null for a binary file. */
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+  /** Unified diff text; null for a binary file or one left out for size. */
+  patch: string | null;
+}
+
+export interface UncommittedFile {
+  path: string;
+  state: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+}
+
+export interface SessionDiff {
+  /** The commit the diff is taken against. */
+  baseCommit: string;
+  headCommit: string;
+  commitCount: number;
+  files: DiffFile[];
+  /** True when at least one file's diff text was left out for size. */
+  truncated: boolean;
+  /** Null when the worktree was removed. */
+  uncommitted: UncommittedFile[] | null;
+}
+
+/** What a branch holds right now, read when the action is opened. */
+export interface BranchState {
+  headCommit: string;
+  /** Commits since the commit the session started from. */
+  commitCount: number;
+  /** Null when the worktree was removed. */
+  uncommitted: UncommittedFile[] | null;
+}
+
+export interface DraftedActionDetail {
+  action: DraftedAction;
+  /** For `open_pr`; null for other types. */
+  branch: BranchState | null;
+  /** For `ticket_transition`: the statuses the ticket can move to now. Null for other types, and when the source can't be read. */
+  transitions: TicketTransition[] | null;
 }

@@ -1,5 +1,5 @@
 import { Injectable, Module } from '@nestjs/common';
-import type { TicketSource, TicketSourceType } from '@slop-control/shared';
+import type { CredentialState, TicketSource, TicketSourceType } from '@slop-control/shared';
 import { isUuid } from '../common/uuid';
 import { Database, type Queryable } from '../db/database';
 
@@ -10,6 +10,10 @@ interface TicketSourceRow {
   github_owner: string | null;
   github_repo: string | null;
   default_linked_repo_id: string | null;
+  credential_state: CredentialState | null;
+  credential_login: string | null;
+  credential_message: string | null;
+  credential_checked_at: Date | null;
   can_create_tickets: boolean;
   disconnected_at: Date | null;
   created_at: Date;
@@ -103,11 +107,46 @@ export class TicketSourceStore {
     ]);
   }
 
-  /** Keeps the first disconnect time, so repeating the call changes nothing. */
+  /**
+   * Keeps the first disconnect time, so repeating the call changes nothing. The credential's
+   * record goes with it, since the caller erases the credential itself.
+   */
   async disconnect(sourceId: string): Promise<void> {
     await this.db.query(
-      'update ticket_source set disconnected_at = coalesce(disconnected_at, now()) where id = $1',
+      `update ticket_source
+       set disconnected_at = coalesce(disconnected_at, now()), credential_state = null,
+           credential_login = null, credential_message = null, credential_checked_at = null
+       where id = $1`,
       [sourceId],
+    );
+  }
+
+  /** Records how a credential's last check or use went. A null state means none is stored. */
+  async setCredentialState(
+    sourceId: string,
+    state: CredentialState | null,
+    message: string | null,
+  ): Promise<void> {
+    await this.db.query(
+      `update ticket_source
+       set credential_state = $2, credential_message = $3,
+           credential_checked_at = case when $2::text is null then null else now() end
+       where id = $1`,
+      [sourceId, state, message],
+    );
+  }
+
+  /** Like `setCredentialState`, but leaves a source with no credential as it is. */
+  async recordCredentialUse(
+    sourceId: string,
+    state: CredentialState,
+    message: string | null,
+  ): Promise<void> {
+    await this.db.query(
+      `update ticket_source
+       set credential_state = $2, credential_message = $3, credential_checked_at = now()
+       where id = $1 and credential_state is not null`,
+      [sourceId, state, message],
     );
   }
 }
@@ -126,7 +165,14 @@ function toTicketSource(row: TicketSourceRow): TicketSource {
     type: row.type,
     label: github ? `${github.githubOwner}/${github.githubRepo}` : 'Built-in',
     scope: github,
-    hasCredential: false,
+    hasCredential: row.credential_state !== null,
+    credential: {
+      isSet: row.credential_state !== null,
+      state: row.credential_state,
+      login: row.credential_login,
+      message: row.credential_message,
+      checkedAt: row.credential_checked_at?.toISOString() ?? null,
+    },
     defaultLinkedRepoId: row.default_linked_repo_id,
     canCreateTickets: row.can_create_tickets,
     disconnectedAt: row.disconnected_at?.toISOString() ?? null,
