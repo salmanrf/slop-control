@@ -22,8 +22,17 @@ export const MARKERS = {
   fail: '[e2e:fail]',
   /** The round ends normally without writing the required artifact. */
   noArtifact: '[e2e:no-artifact]',
-  /** The round writes a file outside `.slop/` and leaves it uncommitted. */
+  /**
+   * The round writes a file outside `.slop/` before any commit. A read-only phase leaves it
+   * uncommitted; a phase that may change code commits it with its work.
+   */
   changeCode: '[e2e:change-code]',
+  /** The round rewrites `README.md` and commits, whatever the phase's scope allows. */
+  commit: '[e2e:commit]',
+  /** The round commits nothing, even in a phase that may change code. */
+  noCommit: '[e2e:no-commit]',
+  /** The round writes a file outside `.slop/` after any commit, so it stays uncommitted. */
+  uncommitted: '[e2e:uncommitted]',
   /** The round reports its start and then runs until it is stopped. */
   keepRunning: '[e2e:keep-running]',
 } as const;
@@ -96,9 +105,16 @@ export class ScriptedRuntime extends SessionRuntime {
       if (script.includes(MARKERS.fail)) return yield ended('error', 'The scripted run failed.');
 
       if (script.includes(MARKERS.changeCode)) write(cwd, 'e2e-change.txt', `round ${round}\n`);
-      if (setup.scope.mayChangeCode) {
+      // A phase that may change code commits its work unless told not to; the marker makes any phase commit.
+      const asked = script.includes(MARKERS.commit);
+      if (asked || (setup.scope.mayChangeCode && !script.includes(MARKERS.noCommit))) {
+        // Replacing a line the clone already has gives the diff a removed line beside the added ones.
+        if (asked) write(cwd, 'README.md', `# Scripted change, round ${round}\n`);
         write(cwd, 'e2e-work.txt', `work from round ${round}\n`);
         commitAll(cwd, `Scripted work, round ${round}`);
+      }
+      if (script.includes(MARKERS.uncommitted)) {
+        write(cwd, 'e2e-uncommitted.txt', `left by round ${round}\n`);
       }
       if (!script.includes(MARKERS.noArtifact)) {
         write(
@@ -123,5 +139,11 @@ function write(cwd: string, relativePath: string, content: string): void {
 function commitAll(cwd: string, message: string): void {
   const identity = ['-c', 'user.name=slop-e2e', '-c', 'user.email=slop-e2e@example.invalid'];
   execFileSync('git', ['add', '-A'], { cwd });
+  // A round can rewrite the same lines an earlier one left, and then there is nothing to commit.
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
+    cwd,
+    encoding: 'utf8',
+  });
+  if (staged.trim() === '') return;
   execFileSync('git', [...identity, 'commit', '-qm', message], { cwd });
 }

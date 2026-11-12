@@ -18,6 +18,18 @@ export const USER_FILE = join(import.meta.dirname, '../.auth/user.json');
 
 /** The repo the GitHub stub serves issues for. */
 export const STUB_REPO = { owner: 'e2e-owner', repo: 'e2e-repo' };
+/** The repo the open PR cases push to. The stub knows it, and it has no issues. */
+export const PR_REPO = { owner: 'e2e-owner', repo: 'pr-repo' };
+/** Whose token the stub says every token is. */
+export const STUB_LOGIN = 'e2e-user';
+
+/**
+ * Holds the bare repos pushes go to, through the server's GITHUB_GIT_URL setting: a repo is at
+ * `<owner>/<repo>.git`, so a push is a real git push that never leaves this machine.
+ */
+export const REMOTES_DIR = join(tmpdir(), 'slop-control-e2e-remotes');
+/** Seals the run's stored credentials. Fixed and worthless: 32 bytes, as hex. */
+export const SECRET_KEY = '0123456789abcdef'.repeat(4);
 
 export interface SupabaseEnv {
   url: string;
