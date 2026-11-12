@@ -53,6 +53,24 @@ _Avoid_: Iteration, revision
 A comment the developer anchors to a line or paragraph of a plan document or diff, to be sent back to the agent.
 _Avoid_: Comment, review note
 
+### Out the door
+
+**Drafted action**:
+An outward-facing action the workspace prepares from a session's round and holds until the developer approves it: an open PR, a ticket comment, or a ticket status change. It can be edited, approved, or rejected on its own.
+_Avoid_: Pending action, proposal, suggestion
+
+**Dispatch**:
+Carrying out an approved drafted action. The workspace does it, outside any session, and records the result or the error on the action.
+_Avoid_: Execute, run
+
+**Approvals inbox**:
+The workspace's list of drafted actions waiting on the developer: the pending ones, and the ones whose dispatch failed.
+_Avoid_: Queue, notifications
+
+**Credential**:
+A token the workspace stores to act on GitHub. A workspace has one for pushing and opening PRs, and each GitHub Issues source has its own for its tickets. A session never holds one. The server's secret store is where credentials are kept.
+_Avoid_: Key, password
+
 ### Testing
 
 **Automated testing** (phase):
