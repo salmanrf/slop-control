@@ -1,9 +1,10 @@
-import type { Session } from '@slop-control/shared';
+import type { DraftedAction, Session } from '@slop-control/shared';
 
 export interface SessionStreamOptions {
   workspaceId: string;
   getToken: () => Promise<string | null>;
   onSession: (session: Session) => void;
+  onAction: (action: DraftedAction) => void;
   /** Fires once subscribed, so the caller refetches and can't miss a change made in between. */
   onConnected: () => void;
   /** Fires each time a connection is lost or can't be made, before the next attempt. */
@@ -29,6 +30,7 @@ export function connectSessionUpdates(options: SessionStreamOptions): () => void
     workspaceId,
     getToken,
     onSession,
+    onAction,
     onConnected,
     onDisconnected,
     onUnauthorized,
@@ -80,9 +82,10 @@ export function connectSessionUpdates(options: SessionStreamOptions): () => void
         buffer += value;
         let end: number;
         while ((end = buffer.indexOf(FRAME_END)) !== -1) {
-          const session = parseFrame(buffer.slice(0, end));
+          const frame = parseFrame(buffer.slice(0, end));
           buffer = buffer.slice(end + FRAME_END.length);
-          if (session) onSession(session);
+          if (frame?.event === 'session_updated') onSession(frame.data);
+          if (frame?.event === 'drafted_action_updated') onAction(frame.data);
         }
       }
     } catch {
@@ -115,13 +118,20 @@ export function connectSessionUpdates(options: SessionStreamOptions): () => void
   };
 }
 
-function parseFrame(frame: string): Session | null {
+type Frame =
+  | { event: 'session_updated'; data: Session }
+  | { event: 'drafted_action_updated'; data: DraftedAction };
+
+const FRAME_EVENTS: Frame['event'][] = ['session_updated', 'drafted_action_updated'];
+
+function parseFrame(frame: string): Frame | null {
   const lines = frame.split('\n');
-  if (!lines.includes('event: session_updated')) return null;
+  const event = FRAME_EVENTS.find((name) => lines.includes(`event: ${name}`));
+  if (!event) return null;
   const data = lines.find((line) => line.startsWith('data: '));
   if (!data) return null;
   try {
-    return JSON.parse(data.slice('data: '.length)) as Session;
+    return { event, data: JSON.parse(data.slice('data: '.length)) } as Frame;
   } catch {
     return null;
   }

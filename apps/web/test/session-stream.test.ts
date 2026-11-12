@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '@slop-control/shared';
+import type { DraftedAction, Session } from '@slop-control/shared';
 import { connectSessionUpdates } from '../src/lib/session-stream';
 
 const session = (id: string) => ({ id, status: 'running' }) as Session;
@@ -33,6 +33,7 @@ function setup(responses: (Response | Error)[]) {
     return next;
   });
   const onSession = vi.fn();
+  const onAction = vi.fn();
   const onConnected = vi.fn();
   const onDisconnected = vi.fn();
   const onUnauthorized = vi.fn();
@@ -41,6 +42,7 @@ function setup(responses: (Response | Error)[]) {
     workspaceId: 'w1',
     getToken: async () => `token-${++tokenCount}`,
     onSession,
+    onAction,
     onConnected,
     onDisconnected,
     onUnauthorized,
@@ -48,7 +50,7 @@ function setup(responses: (Response | Error)[]) {
     retryDelayMs: 1,
     staleAfterMs: 40,
   });
-  return { fetchFn, onSession, onConnected, onDisconnected, onUnauthorized, stop };
+  return { fetchFn, onSession, onAction, onConnected, onDisconnected, onUnauthorized, stop };
 }
 
 describe('connectSessionUpdates', () => {
@@ -78,6 +80,31 @@ describe('connectSessionUpdates', () => {
     stream.write(text.slice(20));
     await flush();
     expect(t.onSession.mock.calls.map(([s]) => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('passes on a drafted action frame as an action, not as a session', async () => {
+    const stream = openStream();
+    const t = setup([stream.response]);
+    cleanupStream = t.stop;
+    await flush();
+
+    const action = { id: 'act-1', status: 'pending' } as DraftedAction;
+    stream.write(`event: drafted_action_updated\ndata: ${JSON.stringify(action)}\n\n`);
+    stream.write(frame(session('a')));
+    await flush();
+    expect(t.onAction.mock.calls.map(([a]) => a.id)).toEqual(['act-1']);
+    expect(t.onSession.mock.calls.map(([s]) => s.id)).toEqual(['a']);
+  });
+
+  it('ignores a frame of an event it does not know', async () => {
+    const stream = openStream();
+    const t = setup([stream.response]);
+    cleanupStream = t.stop;
+    await flush();
+    stream.write('event: something_else\ndata: {"id":"x"}\n\n');
+    await flush();
+    expect(t.onSession).not.toHaveBeenCalled();
+    expect(t.onAction).not.toHaveBeenCalled();
   });
 
   it('ignores heartbeat comments', async () => {

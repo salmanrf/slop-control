@@ -2,6 +2,7 @@ import { Menu, Portal } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { api } from '../lib/app-api';
+import { inboxActions } from '../lib/drafted-actions';
 import { keys } from '../lib/session-cache';
 import { initials } from '../lib/session-view';
 import { supabase } from '../lib/supabase';
@@ -54,7 +55,15 @@ function WorkspaceNav({
     ? 'phase-setups'
     : pathname.endsWith('/sources')
       ? 'sources'
-      : 'tickets';
+      : pathname.endsWith('/approvals')
+        ? 'approvals'
+        : 'tickets';
+  // The same read as the inbox itself, so the stream's action frames keep the count live.
+  const inbox = useQuery({
+    queryKey: keys.inbox(workspaceId),
+    queryFn: () => api.listDraftedActions(workspaceId),
+  });
+  const waiting = inboxActions(inbox.data ?? []).length;
   return (
     <nav
       aria-label="Main"
@@ -81,6 +90,35 @@ function WorkspaceNav({
           <path d="M5 7h6M5 10h4" />
         </svg>
         Tickets
+      </Link>
+      <Link
+        to="/w/$workspaceId/approvals"
+        params={{ workspaceId }}
+        aria-current={section === 'approvals' ? 'page' : undefined}
+        className={cx(NAV_LINK, section === 'approvals' ? NAV_ACTIVE : NAV_IDLE)}
+      >
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <path d="M2 9l2-6h8l2 6v4H2z" />
+          <path d="M2 9h4l1 2h2l1-2h4" />
+        </svg>
+        Approvals
+        {waiting > 0 && (
+          <span
+            data-testid="approvals-count"
+            className="ml-auto rounded-full bg-accent px-2 py-px text-[12px] font-semibold text-white"
+          >
+            {waiting}
+            <span className="sr-only"> waiting</span>
+          </span>
+        )}
       </Link>
       <Link
         to="/w/$workspaceId/sources"

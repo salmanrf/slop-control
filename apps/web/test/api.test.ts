@@ -57,6 +57,99 @@ describe('api client', () => {
     expect(JSON.parse(init.body as string)).toEqual({ message: 'Also commit your work.' });
   });
 
+  const call = (t: ReturnType<typeof setup>) => {
+    const [url, init] = t.fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    return { url, method: init.method, body: init.body ? JSON.parse(init.body as string) : null };
+  };
+
+  it("saves, checks, and removes a workspace's GitHub credential", async () => {
+    const saved = setup(json(200, {}));
+    await saved.api.setGithubCredential('w1', { token: 'ghp_x' });
+    expect(call(saved)).toEqual({
+      url: '/api/workspaces/w1/github-credential',
+      method: 'PUT',
+      body: { token: 'ghp_x' },
+    });
+
+    const checked = setup(json(200, {}));
+    await checked.api.checkGithubCredential('w1');
+    expect(call(checked)).toMatchObject({
+      url: '/api/workspaces/w1/github-credential/check',
+      method: 'POST',
+    });
+
+    const removed = setup(json(200, {}));
+    await removed.api.removeGithubCredential('w1');
+    expect(call(removed)).toMatchObject({
+      url: '/api/workspaces/w1/github-credential',
+      method: 'DELETE',
+    });
+  });
+
+  it("removes a source's credential with a null token, and checks it again", async () => {
+    const removed = setup(json(200, {}));
+    await removed.api.updateSource('w1', 's1', { token: null });
+    expect(call(removed)).toEqual({
+      url: '/api/workspaces/w1/sources/s1',
+      method: 'PATCH',
+      body: { token: null },
+    });
+
+    const checked = setup(json(200, {}));
+    await checked.api.checkSourceCredential('w1', 's1');
+    expect(call(checked)).toMatchObject({
+      url: '/api/workspaces/w1/sources/s1/credential-check',
+      method: 'POST',
+    });
+  });
+
+  it("lists the inbox with the server's default statuses, or with each one named", async () => {
+    const inbox = setup(json(200, []));
+    await inbox.api.listDraftedActions('w1');
+    expect(call(inbox).url).toBe('/api/workspaces/w1/drafted-actions');
+
+    const filtered = setup(json(200, []));
+    await filtered.api.listDraftedActions('w1', ['pending', 'succeeded']);
+    expect(call(filtered).url).toBe(
+      '/api/workspaces/w1/drafted-actions?status=pending&status=succeeded',
+    );
+  });
+
+  it("reads a session's drafted actions and its diff", async () => {
+    const actions = setup(json(200, []));
+    await actions.api.listSessionActions('w1', 'abc');
+    expect(call(actions).url).toBe('/api/workspaces/w1/sessions/abc/drafted-actions');
+
+    const diff = setup(json(200, {}));
+    await diff.api.getSessionDiff('w1', 'abc');
+    expect(call(diff).url).toBe('/api/workspaces/w1/sessions/abc/diff');
+  });
+
+  it('edits, approves with the commit that was shown, and rejects an action', async () => {
+    const edited = setup(json(200, {}));
+    await edited.api.updateDraftedAction('w1', 'act-1', { title: 'T', body: 'B' });
+    expect(call(edited)).toEqual({
+      url: '/api/workspaces/w1/drafted-actions/act-1',
+      method: 'PATCH',
+      body: { title: 'T', body: 'B' },
+    });
+
+    const approved = setup(json(200, {}));
+    await approved.api.approveAction('w1', 'act-1', { expectedHeadCommit: 'abc123' });
+    expect(call(approved)).toEqual({
+      url: '/api/workspaces/w1/drafted-actions/act-1/approve',
+      method: 'POST',
+      body: { expectedHeadCommit: 'abc123' },
+    });
+
+    const rejected = setup(json(200, {}));
+    await rejected.api.rejectAction('w1', 'act-1');
+    expect(call(rejected)).toMatchObject({
+      url: '/api/workspaces/w1/drafted-actions/act-1/reject',
+      method: 'POST',
+    });
+  });
+
   it("raises the server's error code and message", async () => {
     const t = setup(json(503, { code: 'RUNTIME_NOT_READY', message: 'Run claude auth login.' }));
     const error = await t.api.listWorkspaces().catch((e: unknown) => e);

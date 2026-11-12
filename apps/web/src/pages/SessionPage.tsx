@@ -18,9 +18,12 @@ import {
   cx,
   useNow,
 } from '../components/common';
+import { SessionDiffView, useSessionDiff } from '../components/DiffView';
+import { DraftedActionsPanel, useSessionActions } from '../components/DraftedActionsPanel';
 import { Markdown } from '../components/Markdown';
 import { ApiRequestError } from '../lib/api';
 import { api } from '../lib/app-api';
+import { nothingToPush } from '../lib/drafted-actions';
 import { applySessionUpdate, keys } from '../lib/session-cache';
 import {
   formatClock,
@@ -150,6 +153,13 @@ export function SessionPage() {
               below are unchanged; check the branch before relying on it.
             </Notice>
           )}
+          {data.baseFetchFailed && (
+            <Notice>
+              <strong className="font-semibold">The base couldn't be fetched</strong> before this
+              session started, so <Mono>{data.baseRef}</Mono> was used as it was in the clone. The
+              branch, and a pull request from it, may start behind the remote.
+            </Notice>
+          )}
           {active && <LiveStatusPanel session={data} now={now} />}
           {(!active || artifact.data) && (
             <ResultPanel
@@ -159,6 +169,15 @@ export function SessionPage() {
               previous={active}
             />
           )}
+          <DraftedActionsPanel
+            workspaceId={workspaceId}
+            sessionId={sessionId}
+            sessionActive={active}
+          />
+          <NothingToPush workspaceId={workspaceId} session={data} />
+          <Panel label="Changes" title="Changes" aside="against the commit it started from">
+            <SessionDiffView workspaceId={workspaceId} sessionId={sessionId} />
+          </Panel>
           <FollowUpPanel workspaceId={workspaceId} session={data} />
           <details className="rounded-xl border border-line bg-white px-[18px] py-3">
             <summary className="cursor-pointer text-[14px] font-semibold">
@@ -222,6 +241,33 @@ function ResultPill({
     >
       {wording.label}
     </span>
+  );
+}
+
+/** Stands in for the open PR action an implementation session with no commits doesn't get. */
+function NothingToPush({ workspaceId, session }: { workspaceId: string; session: Session }) {
+  const actions = useSessionActions(workspaceId, session.id);
+  const diff = useSessionDiff(workspaceId, session.id);
+  const nothing = nothingToPush(session, actions.data, diff.data);
+  if (!nothing) return null;
+  return (
+    <Notice tone="info">
+      <strong className="font-semibold">Nothing to push.</strong> This session committed nothing to
+      its branch, so no pull request was drafted.
+      {nothing.uncommitted.length > 0 && (
+        <>
+          {' '}
+          It left uncommitted files in the worktree, which are never pushed:{' '}
+          {nothing.uncommitted.map((file, index) => (
+            <span key={file.path}>
+              {index > 0 && ', '}
+              <Mono className="break-all">{file.path}</Mono>
+            </span>
+          ))}
+          .
+        </>
+      )}
+    </Notice>
   );
 }
 

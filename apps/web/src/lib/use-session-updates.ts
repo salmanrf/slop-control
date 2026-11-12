@@ -1,6 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState } from 'react';
-import { applySessionUpdate, refetchSessionQueries } from './session-cache';
+import {
+  applyActionUpdate,
+  applySessionUpdate,
+  refetchActionQueries,
+  refetchSessionQueries,
+} from './session-cache';
 import { connectSessionUpdates } from './session-stream';
 import { getToken, handleExpiredSignIn } from './supabase';
 
@@ -20,9 +25,11 @@ export function useSessionUpdates(workspaceId: string): StreamState {
       workspaceId,
       getToken,
       onSession: (session) => applySessionUpdate(client, session),
+      onAction: (action) => applyActionUpdate(client, action),
       onConnected: () => {
         setState('connected');
         void refetchSessionQueries(client, workspaceId);
+        void refetchActionQueries(client, workspaceId);
       },
       onDisconnected: () => setState('reconnecting'),
       onUnauthorized: handleExpiredSignIn,
