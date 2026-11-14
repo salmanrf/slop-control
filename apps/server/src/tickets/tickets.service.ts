@@ -65,16 +65,18 @@ export class TicketsService {
     if (sourceId && selected.length === 0) throw notFound('Ticket source not found.');
 
     const positions = decodeCursor(query.cursor);
-    const streams = selected.map((source): Stream => {
-      return {
-        source,
-        adapter: this.sources.adapterFor(source),
-        position: positions[source.id] ?? { cursor: null, used: 0, done: false },
-        buffer: [],
-        next: null,
-        status: { sourceId: source.id, state: 'ok', message: null, mineApplied: true },
-      };
-    });
+    const streams = await Promise.all(
+      selected.map(async (source): Promise<Stream> => {
+        return {
+          source,
+          adapter: await this.sources.adapterFor(source),
+          position: positions[source.id] ?? { cursor: null, used: 0, done: false },
+          buffer: [],
+          next: null,
+          status: { sourceId: source.id, state: 'ok', message: null, mineApplied: true },
+        };
+      }),
+    );
     await Promise.all(streams.map((stream) => this.fill(stream, query)));
 
     const items: TicketSummary[] = [];
@@ -108,9 +110,18 @@ export class TicketsService {
     return this.read(await this.sources.get(workspaceId, sourceId), key);
   }
 
-  read(source: TicketSource, key: string): Promise<Ticket> {
-    const adapter = this.sources.adapterFor(source);
-    return withTrackerErrors(() => adapter.get(key));
+  async read(source: TicketSource, key: string): Promise<Ticket> {
+    const adapter = await this.sources.adapterFor(source);
+    return withTrackerErrors(async () => {
+      try {
+        return await adapter.get(key);
+      } catch (error) {
+        if (error instanceof TrackerAuthError) {
+          await this.sources.recordCredentialUse(source.id, 'auth_failed', error.message);
+        }
+        throw error;
+      }
+    });
   }
 
   /** Loads the page at the stream's position. A failure stays with this source and keeps its position. */
@@ -129,6 +140,11 @@ export class TicketsService {
           cursor: position.cursor ?? undefined,
         });
         stream.status.mineApplied = page.mineApplied;
+        // A credential marked as failing by an earlier read works again.
+        if (stream.source.credential.isSet && stream.source.credential.state !== 'ok') {
+          stream.source.credential = { ...stream.source.credential, state: 'ok' };
+          await this.sources.recordCredentialUse(stream.source.id, 'ok', null);
+        }
         stream.buffer = page.items.slice(position.used);
         stream.next = page.nextCursor;
         if (stream.buffer.length > 0) return;
@@ -144,6 +160,8 @@ export class TicketsService {
           state: 'auth_failed',
           message: this.redactor.redact(error.message),
         };
+        // Shown on the source too, where the credential is fixed.
+        await this.sources.recordCredentialUse(stream.source.id, 'auth_failed', error.message);
       } else if (error instanceof TrackerUnavailableError) {
         stream.status = {
           ...stream.status,

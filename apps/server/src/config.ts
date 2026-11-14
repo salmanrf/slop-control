@@ -10,8 +10,15 @@ export class AppConfig {
   jwtAudience!: string;
   /** Holds worktrees; kept outside any linked clone. */
   dataDir!: string;
-  githubToken!: string;
   githubApiUrl!: string;
+  /** The base address git pushes to; a repo is at `<base>/<owner>/<repo>.git`. */
+  githubGitUrl!: string;
+  /** Seals stored credentials (ADR-0004). Null means none can be saved. */
+  secretKey!: string | null;
+  /** True when the retired `GITHUB_TOKEN` setting is still set, so startup can say it's ignored. */
+  githubTokenIgnored!: boolean;
+  /** How long fetching a session's base may take before the session starts without it. */
+  fetchTimeoutMs!: number;
   /** Overrides the host's ssh config when resolving aliases; null uses the host's. */
   sshConfigFile!: string | null;
   /** How often the status stream sends a heartbeat comment. */
@@ -31,8 +38,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : { kind: 'jwks', url: `${supabaseUrl}/auth/v1/.well-known/jwks.json` },
     jwtAudience: env.SUPABASE_JWT_AUDIENCE ?? 'authenticated',
     dataDir: env.SLOP_DATA_DIR ?? join(homedir(), '.slop-control'),
-    githubToken: env.GITHUB_TOKEN ?? '',
     githubApiUrl: env.GITHUB_API_URL ?? 'https://api.github.com',
+    githubGitUrl: env.GITHUB_GIT_URL ?? 'https://github.com',
+    secretKey: env.SLOP_SECRET_KEY?.trim() || null,
+    githubTokenIgnored: Boolean(env.GITHUB_TOKEN),
+    fetchTimeoutMs: 15_000,
     sshConfigFile: null,
     heartbeatMs: 30_000,
     stopGraceMs: 5000,

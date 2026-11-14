@@ -10,7 +10,8 @@
     "test": "jest",
     "build:e2e": "tsc -p tsconfig.e2e.json",
     "start:e2e": "node dist-e2e/test/e2e/main.js",
-    "test:smoke": "CLAUDE_SMOKE=1 NODE_OPTIONS=--experimental-vm-modules jest test/runtime.smoke.spec.ts"
+    "test:smoke:control": "CLAUDE_SMOKE=1 NODE_OPTIONS=--experimental-vm-modules jest test/runtime.smoke-control.spec.ts",
+    "test:smoke": "npm run test:smoke:control && CLAUDE_SMOKE=1 NODE_OPTIONS=--experimental-vm-modules jest test/runtime.smoke.spec.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.316",

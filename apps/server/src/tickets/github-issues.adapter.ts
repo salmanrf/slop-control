@@ -5,6 +5,7 @@ import type {
   TicketQuery,
   TicketSource,
   TicketSummary,
+  TicketTransition,
 } from '@slop-control/shared';
 import { AppConfig } from '../config';
 import {
@@ -14,9 +15,12 @@ import {
   TrackerAdapterFactory,
   TrackerAuthError,
   TrackerUnavailableError,
+  TransitionNotAllowedError,
 } from './tracker';
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const NO_CREDENTIAL_TO_WRITE =
+  'GitHub needs a credential to write to this ticket. Add one to this source.';
 /** Search qualifiers that could widen a search beyond this repo's issues, or undo its filters. */
 const SCOPE_QUALIFIER = /^-?(repo|org|user|is|type|state|assignee|sort):/i;
 
@@ -41,7 +45,10 @@ export interface GitHubOptions {
   loginCache?: Map<string, string>;
 }
 
-/** Read-only GitHub Issues. Error messages never include response bodies, so a token can't echo into them. */
+/**
+ * GitHub Issues. It writes only when an approved drafted action is dispatched. Error messages never
+ * include response bodies, so a token can't echo into them.
+ */
 export class GitHubIssuesAdapter implements TrackerAdapter {
   constructor(
     private readonly owner: string,
@@ -109,6 +116,45 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
     return { ...this.toSummary(issue), body: issue.body ?? '' };
   }
 
+  async addComment(key: string, body: string): Promise<{ url: string | null }> {
+    const number = this.parseKey(key);
+    const response = await this.request(
+      `/repos/${this.owner}/${this.repo}/issues/${number}/comments`,
+      {},
+      { method: 'POST', body: { body } },
+    );
+    this.throwIfMissing(response, key);
+    this.throwOnFailure(response);
+    const { html_url } = (await response.json()) as { html_url?: unknown };
+    return { url: typeof html_url === 'string' ? html_url : null };
+  }
+
+  /** An issue is open or closed, so the only move is to the other one. */
+  async listTransitions(key: string): Promise<TicketTransition[]> {
+    const ticket = await this.get(key);
+    return ticket.statusCategory === 'done'
+      ? [{ status: 'open', category: 'open' }]
+      : [{ status: 'closed', category: 'done' }];
+  }
+
+  async transition(key: string, toStatus: string): Promise<Ticket> {
+    const number = this.parseKey(key);
+    const targets = await this.listTransitions(key);
+    const target = targets.find((item) => item.status === toStatus.trim().toLowerCase());
+    if (!target) {
+      throw new TransitionNotAllowedError(`Ticket ${key} can't move to "${toStatus}".`);
+    }
+    const response = await this.request(
+      `/repos/${this.owner}/${this.repo}/issues/${number}`,
+      {},
+      { method: 'PATCH', body: { state: target.status } },
+    );
+    this.throwIfMissing(response, key);
+    this.throwOnFailure(response);
+    const issue = (await response.json()) as GitHubIssue;
+    return { ...this.toSummary(issue), body: issue.body ?? '' };
+  }
+
   /** The login of the token's user, for the assigned-to-me filter. */
   private async login(): Promise<string> {
     const cached = this.options.loginCache?.get(this.options.token);
@@ -164,7 +210,19 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
     };
   }
 
-  private async request(path: string, params: Record<string, string> = {}): Promise<Response> {
+  private throwIfMissing(response: Response, key: string): void {
+    if (response.status === 404 || response.status === 410) {
+      // GitHub answers a write it won't allow with 404 too, when the token can't see the repo.
+      if (!this.options.token) throw new TrackerAuthError(NO_CREDENTIAL_TO_WRITE);
+      throw new TicketNotFoundError(`Ticket ${key} doesn't exist.`);
+    }
+  }
+
+  private async request(
+    path: string,
+    params: Record<string, string> = {},
+    write?: { method: 'POST' | 'PATCH'; body: unknown },
+  ): Promise<Response> {
     const url = new URL(path, this.options.apiUrl);
     for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
 
@@ -174,9 +232,15 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
       'user-agent': 'slop-control',
     };
     if (this.options.token) headers.authorization = `Bearer ${this.options.token}`;
+    if (write) headers['content-type'] = 'application/json';
 
     try {
-      return await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      return await fetch(url, {
+        method: write?.method ?? 'GET',
+        headers,
+        body: write ? JSON.stringify(write.body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
     } catch {
       throw new TrackerUnavailableError("GitHub can't be reached.");
     }
@@ -189,13 +253,17 @@ export class GitHubIssuesAdapter implements TrackerAdapter {
       (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
     if (rateLimited) throw new TrackerUnavailableError('GitHub is rate limiting this token.');
     if (response.status === 401 || response.status === 403) {
-      throw new TrackerAuthError('GitHub rejected the configured token.');
+      throw new TrackerAuthError(
+        this.options.token
+          ? "GitHub rejected this source's credential."
+          : 'GitHub needs a credential for this. Add one to this source.',
+      );
     }
     throw new TrackerUnavailableError(`GitHub returned an error (${response.status}).`);
   }
 }
 
-/** A source has no stored token yet, so every GitHub Issues source uses the server's `GITHUB_TOKEN`. */
+/** A source reads with its own stored credential, or anonymously without one. No token comes from the server's settings. */
 @Injectable()
 export class GitHubTrackerFactory extends TrackerAdapterFactory {
   private readonly loginCache = new Map<string, string>();
@@ -209,7 +277,7 @@ export class GitHubTrackerFactory extends TrackerAdapterFactory {
       throw new Error(`No adapter for a ${source.type} ticket source.`);
     }
     return new GitHubIssuesAdapter(source.scope.githubOwner, source.scope.githubRepo, {
-      token: token ?? this.config.githubToken,
+      token: token ?? '',
       apiUrl: this.config.githubApiUrl,
       sourceId: source.id,
       loginCache: this.loginCache,

@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createServer, type Server } from 'node:net';
 import {
+  BranchNotFoundError,
   GitWorktreeManager,
   WorktreeCreateError,
   WorktreeDirtyError,
+  WorktreeFetchError,
 } from '../src/worktrees/worktree-manager';
 import { git, makeClone, tempDir } from './support/git';
 
@@ -322,6 +325,256 @@ describe('WorktreeManager', () => {
       expect(git(repoPath, 'rev-parse', worktree.branch)).toBe(commit);
       await manager.restore(repoPath, worktree.path, worktree.branch);
       expect(git(worktree.path, 'rev-parse', 'HEAD')).toBe(commit);
+    });
+  });
+
+  describe('fetch', () => {
+    /** A clone whose origin is a real repo on this machine, so a fetch needs no network. */
+    function cloneOfLocalOrigin(): { origin: string; clone: string } {
+      const origin = makeClone({ origin: null });
+      const clone = tempDir('slop-fetch-clone-');
+      git(clone, 'clone', '-q', origin, '.');
+      return { origin, clone };
+    }
+
+    it("updates origin's branch from the remote, and no local branch or worktree", async () => {
+      const { origin, clone } = cloneOfLocalOrigin();
+      const localBefore = git(clone, 'rev-parse', 'main');
+      writeFileSync(join(origin, 'later.txt'), 'added after the clone\n');
+      git(origin, 'add', '.');
+      git(origin, 'commit', '-qm', 'later');
+
+      await manager.fetch(clone, 'main');
+
+      expect(git(clone, 'rev-parse', 'origin/main')).toBe(git(origin, 'rev-parse', 'main'));
+      expect(git(clone, 'rev-parse', 'main')).toBe(localBefore);
+      expect(existsSync(join(clone, 'later.txt'))).toBe(false);
+    });
+
+    it('throws WorktreeFetchError when the remote cannot be reached, or has no such branch', async () => {
+      const { clone } = cloneOfLocalOrigin();
+      await expect(manager.fetch(clone, 'no-such-branch')).rejects.toBeInstanceOf(
+        WorktreeFetchError,
+      );
+      git(clone, 'remote', 'set-url', 'origin', join(tempDir(), 'gone.git'));
+      await expect(manager.fetch(clone, 'main')).rejects.toBeInstanceOf(WorktreeFetchError);
+      // The clone the other suites use: GitHub over SSH, which the test setup makes fail at once.
+      await expect(manager.fetch(repoPath, 'main')).rejects.toBeInstanceOf(WorktreeFetchError);
+    });
+
+    it('gives up on a remote that never answers', async () => {
+      const sockets: import('node:net').Socket[] = [];
+      const silent: Server = createServer((socket) => sockets.push(socket));
+      await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+      const { port } = silent.address() as { port: number };
+      try {
+        const { clone } = cloneOfLocalOrigin();
+        git(clone, 'remote', 'set-url', 'origin', `http://127.0.0.1:${port}/acme/widgets.git`);
+        const impatient = new GitWorktreeManager({ dataDir, fetchTimeoutMs: 400 });
+        const started = Date.now();
+        await expect(impatient.fetch(clone, 'main')).rejects.toThrow('took too long');
+        expect(Date.now() - started).toBeLessThan(5000);
+      } finally {
+        sockets.forEach((socket) => socket.destroy());
+        await new Promise((resolve) => silent.close(resolve));
+      }
+    });
+  });
+
+  describe('reading a branch', () => {
+    const write = (root: string, path: string, content: string | Buffer) => {
+      mkdirSync(join(root, path, '..'), { recursive: true });
+      writeFileSync(join(root, path), content);
+    };
+    const commitAll = (root: string, message: string) => {
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', message);
+      return git(root, 'rev-parse', 'HEAD');
+    };
+
+    it('reports the head and the commits since the base, with and without the worktree', async () => {
+      const worktree = await create();
+      expect(await manager.branchState(repoPath, worktree.branch, worktree.baseCommit)).toEqual({
+        headCommit: worktree.baseCommit,
+        commitCount: 0,
+      });
+
+      write(worktree.path, 'a.txt', 'a\n');
+      commitAll(worktree.path, 'one');
+      write(worktree.path, 'b.txt', 'b\n');
+      const head = commitAll(worktree.path, 'two');
+      const expected = { headCommit: head, commitCount: 2 };
+      expect(await manager.branchState(repoPath, worktree.branch, worktree.baseCommit)).toEqual(
+        expected,
+      );
+
+      await manager.remove(repoPath, worktree.path, true);
+      expect(await manager.branchState(repoPath, worktree.branch, worktree.baseCommit)).toEqual(
+        expected,
+      );
+    });
+
+    it('throws BranchNotFoundError for a branch that was deleted', async () => {
+      const worktree = await create();
+      await manager.remove(repoPath, worktree.path, true);
+      git(repoPath, 'branch', '-D', worktree.branch);
+      const { branch, baseCommit } = worktree;
+      await expect(manager.branchState(repoPath, branch, baseCommit)).rejects.toBeInstanceOf(
+        BranchNotFoundError,
+      );
+      await expect(manager.diff(repoPath, baseCommit, branch)).rejects.toBeInstanceOf(
+        BranchNotFoundError,
+      );
+      await expect(manager.mergeBase(repoPath, 'origin/main', branch)).rejects.toBeInstanceOf(
+        BranchNotFoundError,
+      );
+    });
+
+    it('diffs added, modified, deleted, renamed, and binary files, the same without the worktree', async () => {
+      write(repoPath, 'old-name.txt', Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n'));
+      write(repoPath, 'doomed.txt', 'bye\n');
+      commitAll(repoPath, 'more files');
+      git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const worktree = await create();
+
+      write(worktree.path, 'README.md', '# widgets\n\nNow with more.\n');
+      write(worktree.path, 'src/new file.ts', 'export const one = 1;\nexport const two = 2;\n');
+      rmSync(join(worktree.path, 'doomed.txt'));
+      git(worktree.path, 'mv', 'old-name.txt', 'new-name.txt');
+      write(worktree.path, 'image.bin', Buffer.from([0, 1, 2, 0, 255, 254, 0, 7]));
+      // Excluded by git, so it's never part of the branch.
+      write(worktree.path, '.slop/implementation-report.md', '# Report\n');
+      commitAll(worktree.path, 'work');
+
+      const read = () => manager.diff(repoPath, worktree.baseCommit, worktree.branch);
+      const { files, truncated } = await read();
+      expect(truncated).toBe(false);
+      const byPath = new Map(files.map((file) => [file.path, file]));
+      expect([...byPath.keys()].sort()).toEqual(
+        ['README.md', 'doomed.txt', 'image.bin', 'new-name.txt', 'src/new file.ts'].sort(),
+      );
+      expect(byPath.get('README.md')).toMatchObject({
+        status: 'modified',
+        previousPath: null,
+        additions: 2,
+        deletions: 0,
+        binary: false,
+      });
+      expect(byPath.get('README.md')!.patch).toContain('+Now with more.');
+      expect(byPath.get('src/new file.ts')).toMatchObject({ status: 'added', additions: 2 });
+      expect(byPath.get('src/new file.ts')!.patch).toContain('+export const one = 1;');
+      expect(byPath.get('doomed.txt')).toMatchObject({ status: 'deleted', deletions: 1 });
+      expect(byPath.get('doomed.txt')!.patch).toContain('-bye');
+      expect(byPath.get('new-name.txt')).toMatchObject({
+        status: 'renamed',
+        previousPath: 'old-name.txt',
+        additions: 0,
+        deletions: 0,
+      });
+      expect(byPath.get('image.bin')).toEqual({
+        path: 'image.bin',
+        previousPath: null,
+        status: 'added',
+        additions: null,
+        deletions: null,
+        binary: true,
+        patch: null,
+      });
+      // Each file's text is its own, not its neighbour's.
+      expect(byPath.get('README.md')!.patch).not.toContain('doomed');
+
+      await manager.remove(repoPath, worktree.path, true);
+      expect(await read()).toEqual({ files, truncated });
+    });
+
+    it('lists an oversized file without its text, and says the diff was cut', async () => {
+      const worktree = await create();
+      write(worktree.path, 'small.txt', 'small\n');
+      write(worktree.path, 'huge.txt', `${'x'.repeat(100)}\n`.repeat(3000));
+      commitAll(worktree.path, 'big');
+      const { files, truncated } = await manager.diff(
+        repoPath,
+        worktree.baseCommit,
+        worktree.branch,
+      );
+      expect(truncated).toBe(true);
+      expect(files.find((file) => file.path === 'huge.txt')).toMatchObject({
+        status: 'added',
+        additions: 3000,
+        binary: false,
+        patch: null,
+      });
+      expect(files.find((file) => file.path === 'small.txt')!.patch).toContain('+small');
+    });
+
+    it('stops adding text once the whole diff is large, and still lists every file', async () => {
+      const worktree = await create();
+      for (let i = 0; i < 12; i += 1) {
+        write(
+          worktree.path,
+          `chunk-${String(i).padStart(2, '0')}.txt`,
+          `${'y'.repeat(99)}\n`.repeat(2400),
+        );
+      }
+      commitAll(worktree.path, 'many');
+      const { files, truncated } = await manager.diff(
+        repoPath,
+        worktree.baseCommit,
+        worktree.branch,
+      );
+      expect(files).toHaveLength(12);
+      expect(truncated).toBe(true);
+      const withText = files.filter((file) => file.patch !== null);
+      expect(withText.length).toBeGreaterThan(0);
+      expect(withText.length).toBeLessThan(12);
+      const total = withText.reduce((sum, file) => sum + Buffer.byteLength(file.patch!), 0);
+      expect(total).toBeLessThanOrEqual(2 * 1024 * 1024);
+    });
+
+    it('lists uncommitted and untracked files by state, leaving out .slop', async () => {
+      write(repoPath, 'tracked.txt', 'one\n');
+      write(repoPath, 'to-delete.txt', 'x\n');
+      write(repoPath, 'to-rename.txt', 'the same content, moved\n');
+      commitAll(repoPath, 'tracked');
+      git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const worktree = await create();
+      expect(await manager.uncommitted(worktree.path)).toEqual([]);
+
+      write(worktree.path, 'tracked.txt', 'two\n');
+      write(worktree.path, 'dir/untracked.txt', 'new\n');
+      write(worktree.path, 'staged.txt', 'staged\n');
+      git(worktree.path, 'add', 'staged.txt');
+      rmSync(join(worktree.path, 'to-delete.txt'));
+      git(worktree.path, 'mv', 'to-rename.txt', 'renamed.txt');
+      write(worktree.path, '.slop/investigation.md', '# Findings\n');
+
+      const files = await manager.uncommitted(worktree.path);
+      expect(files!.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+        { path: 'dir/untracked.txt', state: 'untracked' },
+        { path: 'renamed.txt', state: 'renamed' },
+        { path: 'staged.txt', state: 'added' },
+        { path: 'to-delete.txt', state: 'deleted' },
+        { path: 'tracked.txt', state: 'modified' },
+      ]);
+      // Uncommitted work is not part of the branch.
+      expect((await manager.diff(repoPath, worktree.baseCommit, worktree.branch)).files).toEqual(
+        [],
+      );
+    });
+
+    it('returns null for the uncommitted files of a removed worktree', async () => {
+      const worktree = await create();
+      await manager.remove(repoPath, worktree.path, true);
+      expect(await manager.uncommitted(worktree.path)).toBeNull();
+    });
+
+    it('finds where a branch left its base', async () => {
+      const worktree = await create();
+      write(worktree.path, 'a.txt', 'a\n');
+      commitAll(worktree.path, 'one');
+      expect(await manager.mergeBase(repoPath, 'origin/main', worktree.branch)).toBe(
+        worktree.baseCommit,
+      );
     });
   });
 });

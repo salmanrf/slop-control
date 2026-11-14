@@ -1,9 +1,13 @@
 import type {
   ApiError,
   ApiErrorCode,
+  ApproveActionBody,
   BuiltInTicketComment,
   ConnectSourceBody,
   CreateBuiltInTicketBody,
+  DraftedAction,
+  DraftedActionDetail,
+  DraftedActionStatus,
   LaunchablePhase,
   LaunchPreview,
   LinkedRepo,
@@ -11,14 +15,18 @@ import type {
   PhaseSetup,
   Session,
   SessionArtifact,
+  SessionDiff,
+  SetCredentialBody,
   StartSessionBody,
   Ticket,
   TicketCategoryFilter,
   TicketSource,
   UpdateBuiltInTicketBody,
+  UpdateDraftedActionBody,
   UpdatePhaseSetupBody,
   UpdateSourceBody,
   Workspace,
+  WorkspaceCredentialStatus,
 } from '@slop-control/shared';
 
 export class ApiRequestError extends Error {
@@ -87,6 +95,15 @@ export function createApi({
     linkRepo: (id: string, localPath: string) =>
       request<LinkedRepo>('POST', `/workspaces/${w(id)}/repos`, { localPath }),
 
+    getGithubCredential: (id: string) =>
+      request<WorkspaceCredentialStatus>('GET', `/workspaces/${w(id)}/github-credential`),
+    setGithubCredential: (id: string, body: SetCredentialBody) =>
+      request<WorkspaceCredentialStatus>('PUT', `/workspaces/${w(id)}/github-credential`, body),
+    removeGithubCredential: (id: string) =>
+      request<WorkspaceCredentialStatus>('DELETE', `/workspaces/${w(id)}/github-credential`),
+    checkGithubCredential: (id: string) =>
+      request<WorkspaceCredentialStatus>('POST', `/workspaces/${w(id)}/github-credential/check`),
+
     listSources: (id: string) => request<TicketSource[]>('GET', `/workspaces/${w(id)}/sources`),
     connectSource: (id: string, body: ConnectSourceBody) =>
       request<TicketSource>('POST', `/workspaces/${w(id)}/sources`, body),
@@ -94,6 +111,8 @@ export function createApi({
       request<TicketSource>('PATCH', `/workspaces/${w(id)}/sources/${w(sourceId)}`, body),
     disconnectSource: (id: string, sourceId: string) =>
       request<TicketSource>('DELETE', `/workspaces/${w(id)}/sources/${w(sourceId)}`),
+    checkSourceCredential: (id: string, sourceId: string) =>
+      request<TicketSource>('POST', `/workspaces/${w(id)}/sources/${w(sourceId)}/credential-check`),
 
     listTickets: (id: string, params: TicketListParams = {}) => {
       const query = new URLSearchParams();
@@ -164,6 +183,33 @@ export function createApi({
         'DELETE',
         `/workspaces/${w(id)}/sessions/${w(sessionId)}/worktree${force ? '?force=true' : ''}`,
       ),
+    getSessionDiff: (id: string, sessionId: string) =>
+      request<SessionDiff>('GET', `/workspaces/${w(id)}/sessions/${w(sessionId)}/diff`),
+
+    /** With no statuses, the server lists the ones waiting on the developer. */
+    listDraftedActions: (id: string, statuses: DraftedActionStatus[] = []) => {
+      const query = new URLSearchParams();
+      for (const status of statuses) query.append('status', status);
+      const suffix = query.size > 0 ? `?${query}` : '';
+      return request<DraftedAction[]>('GET', `/workspaces/${w(id)}/drafted-actions${suffix}`);
+    },
+    listSessionActions: (id: string, sessionId: string) =>
+      request<DraftedAction[]>(
+        'GET',
+        `/workspaces/${w(id)}/sessions/${w(sessionId)}/drafted-actions`,
+      ),
+    getDraftedAction: (id: string, actionId: string) =>
+      request<DraftedActionDetail>('GET', `/workspaces/${w(id)}/drafted-actions/${w(actionId)}`),
+    updateDraftedAction: (id: string, actionId: string, body: UpdateDraftedActionBody) =>
+      request<DraftedAction>('PATCH', `/workspaces/${w(id)}/drafted-actions/${w(actionId)}`, body),
+    approveAction: (id: string, actionId: string, body: ApproveActionBody = {}) =>
+      request<DraftedAction>(
+        'POST',
+        `/workspaces/${w(id)}/drafted-actions/${w(actionId)}/approve`,
+        body,
+      ),
+    rejectAction: (id: string, actionId: string) =>
+      request<DraftedAction>('POST', `/workspaces/${w(id)}/drafted-actions/${w(actionId)}/reject`),
   };
 }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import type { TicketSource } from '@slop-control/shared';
 import { TicketSourcesService } from './ticket-sources.service';
 
@@ -23,6 +23,15 @@ export class TicketSourcesController {
     @Body() body: unknown,
   ): Promise<TicketSource> {
     return this.sources.update(workspaceId, sourceId, body);
+  }
+
+  @Post(':sourceId/credential-check')
+  @HttpCode(200)
+  checkCredential(
+    @Param('workspaceId') workspaceId: string,
+    @Param('sourceId') sourceId: string,
+  ): Promise<TicketSource> {
+    return this.sources.checkCredential(workspaceId, sourceId);
   }
 
   @Delete(':sourceId')

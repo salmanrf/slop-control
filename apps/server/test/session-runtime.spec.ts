@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent, RuntimeHandle, RuntimeSetup } from '@slop-control/shared';
+import { Redactor } from '../src/common/redactor';
 import { BASELINE_ENV, BLOCKED_MESSAGE, denyOutwardActions } from '../src/sessions/baseline-scope';
 import { ClaudeCodeRuntime, type SdkQuery } from '../src/sessions/claude-code.runtime';
 import { FakeRun, FakeRuntime } from './support/fake-runtime';
@@ -79,7 +80,7 @@ function makeRuntime(
   scopeProblem: string | null = null,
 ): ClaudeCodeRuntime {
   return new ClaudeCodeRuntime(
-    { githubToken: CANARY_GITHUB_TOKEN },
+    { holdsSecret: (value: string) => value.includes(CANARY_GITHUB_TOKEN) },
     {
       claudeCommand,
       loadQuery: async () => sdk.query,
@@ -713,6 +714,43 @@ describe('ClaudeCodeRuntime', () => {
     it('leaves out an allowlisted variable that holds the token', async () => {
       process.env.ANTHROPIC_SOMETHING = `prefix-${CANARY_GITHUB_TOKEN}`;
       expect(await envOfChild()).not.toHaveProperty('ANTHROPIC_SOMETHING');
+    });
+
+    it("leaves out the server's secret key and anything holding a stored secret", async () => {
+      process.env.SLOP_SECRET_KEY = 'the-key-that-seals-credentials';
+      // A secret known only since the server started, as one saved through the dashboard is.
+      const redactor = new Redactor({ jwt: { kind: 'jwks', url: '' }, secretKey: null });
+      const sdk = new ScriptedSdk();
+      const runtime = new ClaudeCodeRuntime(redactor, {
+        claudeCommand: fakeClaude(LOGGED_IN),
+        loadQuery: async () => sdk.query,
+        checkScopeEnforcement: async () => null,
+      });
+      redactor.add('ghp_saved_after_startup');
+      process.env.ANTHROPIC_BASE_URL = 'https://ghp_saved_after_startup@proxy.invalid';
+      process.env.HTTPS_PROXY = 'http://proxy.invalid';
+      try {
+        const handle = runtime.start({
+          brief: 'x',
+          cwd: makeClone(),
+          setup: {
+            permissionMode: 'auto',
+            scope: { mayChangeCode: false },
+            userLevelSource: false,
+          },
+        });
+        sdk.push(INIT, SUCCESS);
+        for await (const _event of handle.events) void _event;
+        const env = sdk.options!.env as Record<string, string>;
+        expect(env).not.toHaveProperty('SLOP_SECRET_KEY');
+        expect(env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+        expect(JSON.stringify(env)).not.toContain('ghp_saved_after_startup');
+        expect(env.HTTPS_PROXY).toBe('http://proxy.invalid');
+      } finally {
+        delete process.env.SLOP_SECRET_KEY;
+        delete process.env.ANTHROPIC_BASE_URL;
+        delete process.env.HTTPS_PROXY;
+      }
     });
 
     it("leaves out a parent Claude Code session's own variables", async () => {

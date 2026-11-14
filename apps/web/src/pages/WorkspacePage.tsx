@@ -24,6 +24,7 @@ import {
   phaseColors,
   useNow,
 } from '../components/common';
+import { GithubCredentialPanel, useGithubCredential } from '../components/GithubCredentialPanel';
 import { api } from '../lib/app-api';
 import { keys } from '../lib/session-cache';
 import {
@@ -61,7 +62,9 @@ export function WorkspacePage() {
     queryKey: keys.sources(workspaceId),
     queryFn: () => api.listSources(workspaceId),
   });
+  const credential = useGithubCredential(workspaceId);
   const [linking, setLinking] = useState(false);
+  const [showCredential, setShowCredential] = useState(false);
   const [creating, setCreating] = useState(false);
   const [justLinked, setJustLinked] = useState<LinkedRepo | null>(null);
 
@@ -96,6 +99,12 @@ export function WorkspacePage() {
           >
             {noRepo ? 'Link a repo' : 'Link another repo'}
           </AppButton>
+          <AppButton
+            aria-expanded={showCredential}
+            onClick={() => setShowCredential((value) => !value)}
+          >
+            GitHub credential
+          </AppButton>
         </div>
       </div>
 
@@ -117,6 +126,15 @@ export function WorkspacePage() {
             setJustLinked(repo);
           }}
         />
+      )}
+      {credential.data?.state === 'auth_failed' && !showCredential && (
+        <Notice>
+          GitHub rejected this workspace's credential, so it can't push or open a pull request.
+          Replace it under GitHub credential.
+        </Notice>
+      )}
+      {showCredential && (
+        <GithubCredentialPanel workspaceId={workspaceId} repos={repos.data ?? []} />
       )}
       {justLinked && (
         <ConnectIssuesOffer

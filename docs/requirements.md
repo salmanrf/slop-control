@@ -15,7 +15,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 - **FR-4** The workspace must read and write every ticket through a tracker adapter. Tickets from a connected source must not be stored as rows: that tracker stays their source of truth. Only the built-in tracker (FR-6e) stores tickets, and the workspace is their source of truth.
 - **FR-5** The MVP must ship adapters for **Jira**, **GitHub Issues**, and the **built-in tracker**.
-- **FR-6** Every adapter must support: list/search tickets, read ticket details, add a comment, and transition status (the latter two only via approved drafted actions, see FR-27).
+- **FR-6** Every adapter must support: list/search tickets, read ticket details, add a comment, and transition status (the latter two only via approved drafted actions, see FR-27). *Built so far:* the built-in tracker and the GitHub Issues adapter both comment and transition. GitHub Issues moves between open and closed only.
 - **FR-6a** A workspace must be able to connect **zero or more ticket sources**, in any mix and including several of one type. A ticket source is one scope in one tracker: a Jira project or one repository's GitHub Issues.
 - **FR-6b** Connecting a ticket source must be a separate step from linking a repository. Linking a repository must not connect its GitHub Issues, though the linking flow may offer to. A GitHub Issues source need not be a linked repository. Each source has its own credentials (A-5).
 - **FR-6c** The ticket view must list and search the tickets of all the workspace's sources together, show each ticket's source, and allow filtering by source. A source that fails must show its own error (auth or unreachable) while the other sources' tickets still list.
@@ -83,7 +83,7 @@ summary: "Functional and non-functional requirements for Slop Control."
 
 ## Review UI
 
-- **FR-31** The dashboard must include a web code editor showing the session's diff against its base branch, with in-place editing saved back to the worktree.
+- **FR-31** The dashboard must include a web code editor showing the session's diff against its base branch, with in-place editing saved back to the worktree. *Built so far:* the read-only diff, against the commit the session started from. In-place editing waits for the code editor.
 - **FR-32** The dashboard must include a markdown viewer for session artifacts (plans, investigation notes, test reports with their evidence, review reports) and for the workspace's test strategy.
 
 ## Annotations & correction rounds
@@ -190,11 +190,11 @@ summary: "Functional and non-functional requirements for Slop Control."
 ## Unconfirmed (to revisit)
 
 - **A-4** Repositories are cloned by the developer, and the workspace points at local clones to create worktrees. *Alternative:* the workspace clones linked GitHub repos itself.
-- **A-5** The developer supplies GitHub credentials per workspace and tracker credentials per ticket source. *Open:* storage location for these secrets (Supabase vault, OS keychain, env file).
+- **A-5** The developer supplies GitHub credentials per workspace and tracker credentials per ticket source. They are sealed in Postgres under a key from the server's environment, and a push is handed its token through a pipe ([ADR-0004](../adr/0004-secret-storage-and-token-handoff/)). *Open:* that a session running during a push can't see the token is still to be shown on a real session (smoke case SM-16).
 - **A-6** Built solo, part-time, with flexible MVP scope and no fixed deadline.
 - **A-7** Phase artifacts are written to fixed, phase-configured paths in the worktree so the workspace can detect them (FR-22) and derive actions (FR-28a).
 - **A-8** Claude Code sessions can be resumed headlessly with new input (FR-35), so a correction round continues the original session's context. *If wrong:* a correction round starts a fresh session that is given the previous transcript summary and the annotations. **Confirmed** by the [S1-04 spike](../spikes/s1-04-headless-resume/).
-- **A-9** Each plan produces one PR (open PR is drafted per plan, from the plan's branch). *If wrong:* a plan may ship as several PRs or several plans may share one.
+- **A-9** Each plan produces one PR (open PR is drafted per plan, from the plan's branch). Until plans exist, a ticket-level implementation session gets its own PR, from its own branch. *If wrong:* a plan may ship as several PRs or several plans may share one.
 
 - **A-10** Claude Code keeps writing per-message usage and model to its on-disk transcripts, with each sub-agent in its own file next to a small file naming the agent type. This layout is undocumented and may change. *If wrong:* fall back to the session's end-of-run totals, losing the per-sub-agent breakdown and the turns continued in a terminal. **Partly confirmed** by the [S1-05 spike](../spikes/s1-05-transcript-usage/): the layout and per-message usage hold, but transcripts leave out the tool's small background model calls, so their totals run slightly below the SDK's.
 - **A-11** Switching off the user-level source (FR-41) removes user-level `CLAUDE.md`, agents, skills, commands, plugins, settings and hooks. It does **not** remove auto memory or claude.ai connectors, which need their own switches (OQ-8).

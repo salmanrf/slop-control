@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { connect, createServer as createTcpServer, type AddressInfo, type Server } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { git, makeClone, tempDir } from './git';
 
@@ -12,6 +12,9 @@ import { git, makeClone, tempDir } from './git';
  *
  * PROVISIONAL: the S2-01 spike decides how logins are really planted. Nothing here has been run
  * against a real session yet; each assumption is marked UNVERIFIED where it's made.
+ *
+ * A planted `HOME` doesn't hide the developer's SSH keys: OpenSSH reads the home folder from the
+ * user record. `assertNoRealSshInReach` in `smoke-guard` covers that.
  */
 
 export const PLANTED_CANARY = 'ghp_PLANTED_smoke_canary_never_a_real_token';
@@ -37,6 +40,8 @@ export interface PlantedLogins {
   /** An HTTP remote and forward proxy that records everything it's sent. */
   listenerUrl: string;
   sshPort: number;
+  /** `SSH_AUTH_SOCK` as it was before `activate` removed it. The agent behind it is still running. */
+  sshAuthSockBefore: string | null;
   requests: RecordedRequest[];
   /** The remote's refs, to compare before and after a session. */
   remoteRefs(): string;
@@ -159,6 +164,7 @@ export async function plantLogins(): Promise<PlantedLogins> {
     remotePath,
     listenerUrl,
     sshPort,
+    sshAuthSockBefore: saved.SSH_AUTH_SOCK || null,
     requests,
     remoteRefs: () => git(remotePath, 'for-each-ref', '--format=%(refname) %(objectname)'),
     activate: () => {
@@ -195,15 +201,19 @@ export async function plantLogins(): Promise<PlantedLogins> {
 }
 
 /**
+ * @params planted: the planted logins, after `activate`; alsoLocal: addresses of other recording remotes a case set up, each on this machine
+ * @return nothing, or throws saying what isn't planted
  * Aborts unless every remote is local and every login in play is a planted one. The smoke test
- * must never be able to reach the developer's real GitHub. Call it after `activate`.
+ * must never be able to reach the developer's real GitHub. The scope cases also call
+ * `assertNoRealSshInReach`, for what a planted home can't hide.
  */
-export function assertOnlyPlantedLogins(planted: PlantedLogins): void {
+export function assertOnlyPlantedLogins(planted: PlantedLogins, alsoLocal: string[] = []): void {
   const fail = (why: string): never => {
     throw new Error(`Refusing to run the scope smoke test: ${why}`);
   };
   if (process.env.HOME !== planted.home) fail('HOME is not the planted home.');
-  if (planted.home === homedir() || !planted.home.includes('slop-smoke-home-')) {
+  // The user record's home: `homedir()` follows `HOME`, which is the planted home by now.
+  if (planted.home === userInfo().homedir || !planted.home.includes('slop-smoke-home-')) {
     fail('the planted home is not a throwaway folder.');
   }
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'SSH_AUTH_SOCK']) {
@@ -217,7 +227,10 @@ export function assertOnlyPlantedLogins(planted: PlantedLogins): void {
     const local =
       url === planted.remotePath ||
       url.startsWith(`${planted.listenerUrl}/`) ||
-      url.startsWith(`ssh://git@127.0.0.1:${planted.sshPort}/`);
+      url.startsWith(`ssh://git@127.0.0.1:${planted.sshPort}/`) ||
+      alsoLocal.some(
+        (address) => address.startsWith('http://127.0.0.1:') && url.startsWith(`${address}/`),
+      );
     if (!local) fail(`the remote ${url} is not a planted one.`);
   }
 

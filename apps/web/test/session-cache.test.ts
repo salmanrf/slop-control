@@ -1,7 +1,13 @@
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '@slop-control/shared';
-import { applySessionUpdate, keys, refetchSessionQueries } from '../src/lib/session-cache';
+import type { DraftedAction, DraftedActionDetail, Session } from '@slop-control/shared';
+import {
+  applyActionUpdate,
+  applySessionUpdate,
+  keys,
+  refetchActionQueries,
+  refetchSessionQueries,
+} from '../src/lib/session-cache';
 
 const session = (
   id: string,
@@ -141,5 +147,123 @@ describe('session cache', () => {
     expect(fetchMine).toHaveBeenCalled();
     expect(fetchTheirs).not.toHaveBeenCalled();
     expect(client.getQueryData(keys.session('w1', 'a'))).toMatchObject({ status: 'ended' });
+  });
+
+  describe('a drafted action update', () => {
+    const action = (
+      id: string,
+      status: DraftedAction['status'],
+      updatedAt = '2026-11-12T10:00:00Z',
+      overrides: Partial<DraftedAction> = {},
+    ) =>
+      ({
+        id,
+        status,
+        updatedAt,
+        createdAt: '2026-11-12T09:00:00Z',
+        type: 'open_pr',
+        workspaceId: 'w1',
+        sessionId: 'a',
+        ticketSourceId: 's1',
+        ticketKey: 'T-1',
+        ...overrides,
+      }) as DraftedAction;
+    const listKey = keys.sessionActions('w1', 'a');
+    const inboxKey = keys.inbox('w1');
+    const ids = (key: readonly unknown[]) =>
+      client.getQueryData<DraftedAction[]>(key)!.map((item) => [item.id, item.status]);
+
+    it("adds a new draft to the end of its session's list and the top of the inbox", () => {
+      const earlier = action('x', 'pending', undefined, { createdAt: '2026-11-12T08:00:00Z' });
+      client.setQueryData(listKey, [earlier]);
+      client.setQueryData(inboxKey, [earlier]);
+
+      applyActionUpdate(client, action('y', 'pending'));
+
+      expect(ids(listKey)).toEqual([
+        ['x', 'pending'],
+        ['y', 'pending'],
+      ]);
+      expect(ids(inboxKey)).toEqual([
+        ['y', 'pending'],
+        ['x', 'pending'],
+      ]);
+    });
+
+    it('keeps an approved action on its session and takes it out of the inbox', () => {
+      client.setQueryData(listKey, [action('x', 'pending')]);
+      client.setQueryData(inboxKey, [action('x', 'pending')]);
+
+      applyActionUpdate(client, action('x', 'dispatching', '2026-11-12T10:00:01Z'));
+      expect(ids(listKey)).toEqual([['x', 'dispatching']]);
+      expect(ids(inboxKey)).toEqual([]);
+
+      applyActionUpdate(client, action('x', 'failed', '2026-11-12T10:00:02Z'));
+      expect(ids(listKey)).toEqual([['x', 'failed']]);
+      expect(ids(inboxKey)).toEqual([['x', 'failed']]);
+    });
+
+    it("leaves another session's list alone, and creates no list nobody has loaded", () => {
+      const other = keys.sessionActions('w1', 'b');
+      client.setQueryData(other, []);
+      applyActionUpdate(client, action('x', 'pending'));
+      expect(client.getQueryData(other)).toEqual([]);
+      expect(client.getQueryData(listKey)).toBeUndefined();
+      expect(client.getQueryData(inboxKey)).toBeUndefined();
+    });
+
+    it('drops a state saved before the one already held', () => {
+      client.setQueryData(listKey, [action('x', 'succeeded', '2026-11-12T10:00:05Z')]);
+      client.setQueryData(inboxKey, []);
+
+      applyActionUpdate(client, action('x', 'dispatching', '2026-11-12T10:00:01Z'));
+
+      expect(ids(listKey)).toEqual([['x', 'succeeded']]);
+      expect(ids(inboxKey)).toEqual([]);
+    });
+
+    it('lets a failed action be approved again', () => {
+      client.setQueryData(listKey, [action('x', 'failed', '2026-11-12T10:00:02Z')]);
+      applyActionUpdate(client, action('x', 'dispatching', '2026-11-12T10:00:09Z'));
+      expect(ids(listKey)).toEqual([['x', 'dispatching']]);
+    });
+
+    it('updates the action inside a loaded detail, keeping its branch state', () => {
+      const detailKey = keys.actionDetail('w1', 'x');
+      const branch = { headCommit: 'abc', commitCount: 1, uncommitted: null };
+      client.setQueryData(detailKey, { action: action('x', 'pending'), branch, transitions: null });
+
+      applyActionUpdate(client, action('x', 'rejected', '2026-11-12T10:00:03Z'));
+
+      expect(client.getQueryData<DraftedActionDetail>(detailKey)).toMatchObject({
+        action: { status: 'rejected' },
+        branch,
+      });
+    });
+
+    it('rereads the credentials after a failed dispatch, which may have marked one', () => {
+      client.setQueryData(keys.githubCredential('w1'), { isSet: true });
+      client.setQueryData(keys.sources('w1'), []);
+      applyActionUpdate(client, action('x', 'failed'));
+      expect(client.getQueryState(keys.githubCredential('w1'))?.isInvalidated).toBe(true);
+      expect(client.getQueryState(keys.sources('w1'))?.isInvalidated).toBe(true);
+    });
+
+    it("refetches only this workspace's action queries after a reconnect", async () => {
+      const fetchMine = vi.fn(async () => [action('x', 'pending')]);
+      const fetchTheirs = vi.fn(async () => []);
+      client.setQueryData(keys.inbox('w1'), []);
+      client.setQueryData(keys.inbox('w2'), []);
+      const mine = client.getQueryCache().find({ queryKey: keys.inbox('w1') })!;
+      const theirs = client.getQueryCache().find({ queryKey: keys.inbox('w2') })!;
+      mine.setOptions({ queryKey: keys.inbox('w1'), queryFn: fetchMine });
+      theirs.setOptions({ queryKey: keys.inbox('w2'), queryFn: fetchTheirs });
+
+      await refetchActionQueries(client, 'w1');
+
+      expect(fetchMine).toHaveBeenCalled();
+      expect(fetchTheirs).not.toHaveBeenCalled();
+      expect(ids(keys.inbox('w1'))).toEqual([['x', 'pending']]);
+    });
   });
 });

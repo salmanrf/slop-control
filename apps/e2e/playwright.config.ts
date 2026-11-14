@@ -4,7 +4,9 @@ import {
   DATA_DIR,
   GITHUB_STUB_URL,
   PORTS,
+  REMOTES_DIR,
   REPO_ROOT,
+  SECRET_KEY,
   WEB_URL,
   supabaseEnv,
 } from './support/env';
@@ -13,12 +15,13 @@ const supabase = supabaseEnv();
 
 /**
  * The opt-in browser run (S2-12): the real web app, Nest server, Supabase Auth, Postgres, and git,
- * with Claude Code replaced by a scripted runtime and GitHub by a local stub. It costs no quota
- * and isn't part of `npm test`. Run it with `npm run test:e2e`.
+ * with Claude Code replaced by a scripted runtime, the GitHub API by a local stub, and GitHub's
+ * git remotes by local bare repos (S3-11). It costs no quota and isn't part of `npm test`. Run it
+ * with `npm run test:e2e`.
  */
 export default defineConfig({
   testDir: './tests',
-  // The steps follow the demo script in order and share one workspace.
+  // The steps follow the demo script in order and share one workspace. Files run in name order.
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -54,8 +57,14 @@ export default defineConfig({
         DATABASE_URL: supabase.databaseUrl,
         SUPABASE_URL: supabase.url,
         GITHUB_API_URL: GITHUB_STUB_URL,
-        // Empty on purpose: the run must work with no GitHub access at all.
-        GITHUB_TOKEN: '',
+        // Pushes go to local bare repos under this folder, which need no credential.
+        GITHUB_GIT_URL: REMOTES_DIR,
+        SLOP_SECRET_KEY: SECRET_KEY,
+        // The clones name github.com as their origin, and the server fetches a session's base
+        // from it. Neither setting lets git leave this machine: the fetch fails at once, and the
+        // session starts from the clone's own ref with a warning.
+        GIT_ALLOW_PROTOCOL: 'file',
+        GIT_SSH_COMMAND: '/usr/bin/false',
         SLOP_DATA_DIR: DATA_DIR,
         E2E_STEP_MS: '400',
       },

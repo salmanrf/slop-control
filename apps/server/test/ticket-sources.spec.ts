@@ -59,6 +59,7 @@ describe('ticket sources', () => {
           label: 'Built-in',
           scope: null,
           hasCredential: false,
+          credential: { isSet: false, state: null, login: null, message: null, checkedAt: null },
           defaultLinkedRepoId: null,
           canCreateTickets: true,
           disconnectedAt: null,
@@ -134,7 +135,8 @@ describe('ticket sources', () => {
       ['a blank owner', { ...GADGETS, githubOwner: '  ' }],
       ['an owner with a path in it', { ...GADGETS, githubOwner: 'acme/evil' }],
       ['a repo with a path in it', { ...GADGETS, githubRepo: '../other' }],
-      ['a token', { ...GADGETS, token: 'ghp_per_source_token' }],
+      ['a blank token', { ...GADGETS, token: '  ' }],
+      ['a token that is not text', { ...GADGETS, token: 5 }],
       ['a default repo that is not a string', { ...GADGETS, defaultLinkedRepoId: 5 }],
       ['a body that is not an object', ['github_issues']],
     ])('rejects %s with a 422 and saves nothing', async (_name, body) => {
@@ -192,11 +194,204 @@ describe('ticket sources', () => {
       expect((await connect(GADGETS, UNKNOWN)).status).toBe(404);
     });
 
-    it('never returns the server token, which is the only credential in play', async () => {
-      const res = await connect(GADGETS);
-      expect(JSON.stringify(res.body)).not.toContain(CANARY_GITHUB_TOKEN);
-      expect(JSON.stringify(await sources())).not.toContain(CANARY_GITHUB_TOKEN);
-      expect((await sources()).every((source) => source.hasCredential === false)).toBe(true);
+    it('gives a source no credential unless one is sent, whatever GITHUB_TOKEN holds', async () => {
+      process.env.GITHUB_TOKEN = CANARY_GITHUB_TOKEN;
+      try {
+        const res = await connect(GADGETS);
+        expect(res.body.credential).toEqual({
+          isSet: false,
+          state: null,
+          login: null,
+          message: null,
+          checkedAt: null,
+        });
+        await h.api.get(`/workspaces/${workspaceId}/tickets`);
+        expect(h.tracker.source('acme/gadgets').lastToken).toBeNull();
+        expect((await sources()).every((source) => source.hasCredential === false)).toBe(true);
+      } finally {
+        delete process.env.GITHUB_TOKEN;
+      }
+    });
+  });
+
+  describe('stored credentials', () => {
+    const TOKEN = 'ghp_source_token_for_gadgets';
+    const gadgets = () => h.tracker.source('acme/gadgets');
+    const patch = (id: string, body: unknown) =>
+      h.api.patch(`${sourcesPath()}/${id}`).send(body as object);
+    const check = (id: string, ws = workspaceId) =>
+      h.api.post(`${sourcesPath(ws)}/${id}/credential-check`);
+    const listTickets = () => h.api.get(`/workspaces/${workspaceId}/tickets`);
+
+    it('checks a token when connecting, stores it, and reads with it from then on', async () => {
+      const res = await connect({ ...GADGETS, token: TOKEN });
+      expect(res.status).toBe(201);
+      expect(gadgets().lastToken).toBe(TOKEN);
+      expect(res.body.hasCredential).toBe(true);
+      expect(res.body.credential).toMatchObject({ isSet: true, state: 'ok', message: null });
+      expect(res.body.credential.checkedAt).toEqual(expect.any(String));
+      expect(JSON.stringify(res.body)).not.toContain(TOKEN);
+
+      gadgets().lastToken = null;
+      await listTickets();
+      expect(gadgets().lastToken).toBe(TOKEN);
+      expect(JSON.stringify(await sources())).not.toContain(TOKEN);
+    });
+
+    it('stores nothing when the tracker rejects the token at connect', async () => {
+      gadgets().verifyFailure = new TrackerAuthError('nope');
+      const res = await connect({ ...GADGETS, token: TOKEN });
+      expect(res.status).toBe(502);
+      expect(res.body.code).toBe('TRACKER_AUTH_FAILED');
+      expect(await sources()).toHaveLength(1);
+    });
+
+    it('replaces a credential, and keeps the earlier one when the new token is rejected', async () => {
+      const id = (await connect({ ...GADGETS, token: TOKEN })).body.id as string;
+
+      gadgets().verifyFailure = new TrackerAuthError('nope');
+      const rejected = await patch(id, { token: 'ghp_bad_replacement' });
+      expect(rejected.status).toBe(502);
+      expect(rejected.body.code).toBe('TRACKER_AUTH_FAILED');
+      gadgets().verifyFailure = new TrackerUnavailableError('down');
+      expect((await patch(id, { token: 'ghp_bad_replacement' })).body.code).toBe(
+        'TRACKER_UNAVAILABLE',
+      );
+      gadgets().verifyFailure = null;
+      await listTickets();
+      expect(gadgets().lastToken).toBe(TOKEN);
+
+      const replaced = await patch(id, { token: 'ghp_second_token' });
+      expect(replaced.status).toBe(200);
+      expect(replaced.body.credential.state).toBe('ok');
+      expect(JSON.stringify(replaced.body)).not.toContain('ghp_second_token');
+      await listTickets();
+      expect(gadgets().lastToken).toBe('ghp_second_token');
+    });
+
+    it('changes nothing else when the new token is rejected', async () => {
+      const repoId = await linkRepo();
+      const id = (await connect(GADGETS)).body.id as string;
+      gadgets().verifyFailure = new TrackerAuthError('nope');
+      const res = await patch(id, { token: 'ghp_bad_replacement', defaultLinkedRepoId: repoId });
+      expect(res.status).toBe(502);
+      const source = (await sources()).find((item) => item.id === id)!;
+      expect(source).toMatchObject({ defaultLinkedRepoId: null, hasCredential: false });
+    });
+
+    it('removes a credential with null, and then reads anonymously', async () => {
+      const id = (await connect({ ...GADGETS, token: TOKEN })).body.id as string;
+      const removed = await patch(id, { token: null });
+      expect(removed.status).toBe(200);
+      expect(removed.body).toMatchObject({ hasCredential: false, credential: { isSet: false } });
+      await listTickets();
+      expect(gadgets().lastToken).toBeNull();
+      expect((await check(id)).body.code).toBe('CREDENTIAL_NOT_SET');
+    });
+
+    it('checks a stored credential again and records what the tracker says', async () => {
+      const id = (await connect({ ...GADGETS, token: TOKEN })).body.id as string;
+
+      gadgets().verifyFailure = new TrackerAuthError(`GitHub rejected ${TOKEN}.`);
+      const failed = await check(id);
+      expect(failed.status).toBe(200);
+      expect(failed.body.credential).toMatchObject({ isSet: true, state: 'auth_failed' });
+      expect(failed.body.credential.message).toContain('rejected');
+      expect(JSON.stringify(failed.body)).not.toContain(TOKEN);
+
+      gadgets().verifyFailure = new TrackerUnavailableError('down');
+      expect((await check(id)).body.credential.state).toBe('unavailable');
+
+      gadgets().verifyFailure = null;
+      const ok = await check(id);
+      expect(ok.body.credential).toMatchObject({ state: 'ok', message: null });
+    });
+
+    it('marks the credential as failing when a read is rejected for it', async () => {
+      const id = (await connect({ ...GADGETS, token: TOKEN })).body.id as string;
+      gadgets().failure = new TrackerAuthError('expired');
+      await listTickets();
+      const state = async () => (await sources()).find((item) => item.id === id)!.credential.state;
+      expect(await state()).toBe('auth_failed');
+
+      // And as working again once a read goes through.
+      gadgets().failure = null;
+      await listTickets();
+      expect(await state()).toBe('ok');
+    });
+
+    it('refuses the check for a source with no credential, a disconnected one, and an unknown one', async () => {
+      const id = (await connect(GADGETS)).body.id as string;
+      const none = await check(id);
+      expect(none.status).toBe(409);
+      expect(none.body.code).toBe('CREDENTIAL_NOT_SET');
+
+      await h.api.delete(`${sourcesPath()}/${id}`);
+      const disconnected = await check(id);
+      expect(disconnected.status).toBe(409);
+      expect(disconnected.body.code).toBe('SOURCE_DISCONNECTED');
+
+      expect((await check(UNKNOWN)).status).toBe(404);
+      expect((await check(id, UNKNOWN)).status).toBe(404);
+    });
+
+    it('erases the credential on disconnect, so reconnecting needs the token again', async () => {
+      const id = (await connect({ ...GADGETS, token: TOKEN })).body.id as string;
+      const disconnected = await h.api.delete(`${sourcesPath()}/${id}`);
+      expect(disconnected.body.hasCredential).toBe(false);
+
+      const again = await connect(GADGETS);
+      expect(again.body.id).toBe(id);
+      expect(again.body.hasCredential).toBe(false);
+      await listTickets();
+      expect(gadgets().lastToken).toBeNull();
+    });
+
+    it('refuses a token for the built-in tracker and for a disconnected source', async () => {
+      const builtIn = (await sources())[0]!;
+      const fixed = await patch(builtIn.id, { token: TOKEN });
+      expect(fixed.status).toBe(409);
+      expect(fixed.body.code).toBe('BUILT_IN_SOURCE_FIXED');
+
+      const id = (await connect(GADGETS)).body.id as string;
+      await h.api.delete(`${sourcesPath()}/${id}`);
+      const gone = await patch(id, { token: TOKEN });
+      expect(gone.status).toBe(409);
+      expect(gone.body.code).toBe('SOURCE_DISCONNECTED');
+    });
+
+    it("doesn't let another workspace's source use it", async () => {
+      await connect({ ...GADGETS, token: TOKEN });
+      const other = (await h.api.post('/workspaces').send({ name: 'other' })).body.id as string;
+      const theirs = await connect(GADGETS, other);
+      expect(theirs.body.hasCredential).toBe(false);
+      gadgets().lastToken = 'unset';
+      await h.api.get(`/workspaces/${other}/tickets`);
+      expect(gadgets().lastToken).toBeNull();
+    });
+
+    it('says what to set when the server has no secret key', async () => {
+      const keyless = await createHarness({ secretKey: null });
+      try {
+        const ws = (await keyless.api.post('/workspaces').send({ name: 'keyless' })).body.id;
+        const refused = await keyless.api
+          .post(`/workspaces/${ws}/sources`)
+          .send({ ...GADGETS, token: TOKEN });
+        expect(refused.status).toBe(503);
+        expect(refused.body.code).toBe('SECRETS_NOT_CONFIGURED');
+        expect(refused.body.message).toContain('SLOP_SECRET_KEY');
+
+        // Everything that needs no credential keeps working.
+        const plain = await keyless.api.post(`/workspaces/${ws}/sources`).send(GADGETS);
+        expect(plain.status).toBe(201);
+        const update = await keyless.api
+          .patch(`/workspaces/${ws}/sources/${plain.body.id}`)
+          .send({ token: TOKEN });
+        expect(update.status).toBe(503);
+        expect(update.body.code).toBe('SECRETS_NOT_CONFIGURED');
+      } finally {
+        await keyless.close();
+      }
     });
   });
 
@@ -220,8 +415,8 @@ describe('ticket sources', () => {
     });
 
     it.each([
-      ['a token', { token: 'ghp_new' }],
-      ['a token beside a valid field', { token: 'ghp_new', defaultLinkedRepoId: null }],
+      ['a blank token', { token: ' ' }],
+      ['a token that is not text', { token: 9, defaultLinkedRepoId: null }],
       ['a default repo that is not a string', { defaultLinkedRepoId: 7 }],
       ['a body that is not an object', []],
     ])('rejects %s with a 422', async (_name, body) => {

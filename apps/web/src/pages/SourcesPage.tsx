@@ -10,6 +10,7 @@ import {
   StatusDot,
 } from '../components/common';
 import { api } from '../lib/app-api';
+import { credentialWording } from '../lib/credential-view';
 import { keys } from '../lib/session-cache';
 import { formatMoment } from '../lib/session-view';
 
@@ -140,10 +141,7 @@ function SourceCard({
           and results are kept, and new sessions on its tickets are blocked until it's reconnected.
         </p>
       ) : (
-        <p className="text-[13px] text-ink-soft">
-          Read with the server's GitHub token, or anonymously without one. No credential is stored
-          here.
-        </p>
+        <SourceCredential workspaceId={workspaceId} source={source} />
       )}
 
       {!builtIn && !disconnected && (
@@ -189,11 +187,97 @@ function SourceCard({
   );
 }
 
+/** A source's own token, for reading and writing its tickets. Its value is never shown again. */
+function SourceCredential({ workspaceId, source }: { workspaceId: string; source: TicketSource }) {
+  const changed = useSourcesChanged(workspaceId);
+  const [token, setToken] = useState('');
+  const { credential } = source;
+  const wording = credentialWording(credential);
+
+  const save = useMutation({
+    mutationFn: () => api.updateSource(workspaceId, source.id, { token: token.trim() }),
+    onSuccess: async () => {
+      setToken('');
+      await changed();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.updateSource(workspaceId, source.id, { token: null }),
+    onSuccess: changed,
+  });
+  const check = useMutation({
+    mutationFn: () => api.checkSourceCredential(workspaceId, source.id),
+    onSuccess: changed,
+  });
+  const busy = save.isPending || remove.isPending || check.isPending;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    save.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
+        <span className="font-semibold">Credential</span>
+        <span data-testid="source-credential-state">
+          <StatusDot tone={wording.tone} label={wording.label} />
+        </span>
+        {credential.checkedAt && (
+          <span className="text-[12px] text-muted">
+            Last checked {formatMoment(credential.checkedAt)}
+          </span>
+        )}
+      </div>
+      {credential.isSet ? (
+        credential.message && (
+          <p role="status" className="text-[13px] text-danger-text">
+            {credential.message}
+          </p>
+        )
+      ) : (
+        <p className="text-[13px] text-ink-soft">
+          No credential is stored, so this source is read anonymously. That works for a public repo;
+          a private repo, the Assigned to me filter, and comments need a token.
+        </p>
+      )}
+      <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+        <LabeledInput
+          label={`${credential.isSet ? 'Replace the token' : 'Token'} for ${source.label}`}
+          type="password"
+          autoComplete="off"
+          mono
+          required
+          className="min-w-0 flex-[1_1_280px]"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+        />
+        <AppButton type="submit" disabled={busy}>
+          Save credential
+        </AppButton>
+        {credential.isSet && (
+          <>
+            <AppButton disabled={busy} onClick={() => check.mutate()}>
+              Check again
+            </AppButton>
+            <AppButton tone="danger" disabled={busy} onClick={() => remove.mutate()}>
+              Remove credential
+            </AppButton>
+          </>
+        )}
+      </form>
+      <ErrorMessage error={save.error} />
+      <ErrorMessage error={check.error} />
+      <ErrorMessage error={remove.error} />
+    </div>
+  );
+}
+
 function ConnectSourceForm({ workspaceId, repos }: { workspaceId: string; repos: LinkedRepo[] }) {
   const changed = useSourcesChanged(workspaceId);
   const [owner, setOwner] = useState('');
   const [repo, setRepo] = useState('');
   const [defaultRepoId, setDefaultRepoId] = useState(NO_REPO);
+  const [token, setToken] = useState('');
   const connect = useMutation({
     mutationFn: () =>
       api.connectSource(workspaceId, {
@@ -201,8 +285,10 @@ function ConnectSourceForm({ workspaceId, repos }: { workspaceId: string; repos:
         githubOwner: owner.trim(),
         githubRepo: repo.trim(),
         defaultLinkedRepoId: defaultRepoId || undefined,
+        token: token.trim() || undefined,
       }),
     onSuccess: async () => {
+      setToken('');
       setOwner('');
       setRepo('');
       setDefaultRepoId(NO_REPO);
@@ -224,7 +310,8 @@ function ConnectSourceForm({ workspaceId, repos }: { workspaceId: string; repos:
           <h2 className="font-semibold">Connect GitHub Issues</h2>
           <p className="text-[13px] text-ink-soft">
             Any repo's Issues, linked here or not. It's checked before it's saved. Connecting a
-            source turns off new tickets in the built-in tracker.
+            source turns off new tickets in the built-in tracker. Without a token it is read
+            anonymously, which is enough for a public repo.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -259,6 +346,15 @@ function ConnectSourceForm({ workspaceId, repos }: { workspaceId: string; repos:
               </option>
             ))}
           </LabeledSelect>
+          <LabeledInput
+            label="Token (optional)"
+            type="password"
+            autoComplete="off"
+            mono
+            className="min-w-0 flex-[1_1_220px]"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+          />
           <AppButton tone="primary" type="submit" disabled={connect.isPending}>
             Connect source
           </AppButton>

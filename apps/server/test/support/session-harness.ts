@@ -1,6 +1,8 @@
 import type { Session } from '@slop-control/shared';
+import { RepoHost } from '../../src/repo-host/repo-host';
 import { SessionRuntime } from '../../src/sessions/runtime';
 import { TrackerAdapterFactory } from '../../src/tickets/tracker';
+import { FakeRepoHost } from './fake-repo-host';
 import { FakeRun, FakeRuntime } from './fake-runtime';
 import { FakeTracker, ticket } from './fake-tracker';
 import { makeClone } from './git';
@@ -12,6 +14,7 @@ export const ENCODED_KEY = encodeURIComponent(KEY);
 export interface Harness extends TestApp {
   runtime: FakeRuntime;
   tracker: FakeTracker;
+  host: FakeRepoHost;
 }
 
 /** A workspace with one linked clone of `acme/widgets` and that repo's Issues connected as a source. */
@@ -30,19 +33,21 @@ export interface TicketRef {
 }
 
 export async function createHarness(
-  options: TestAppOptions & { runtime?: FakeRuntime } = {},
+  options: TestAppOptions & { runtime?: FakeRuntime; host?: FakeRepoHost } = {},
 ): Promise<Harness> {
   const runtime = options.runtime ?? new FakeRuntime();
   const tracker = new FakeTracker();
+  const host = options.host ?? new FakeRepoHost();
   const app = await createTestApp({
     ...options,
     overrides: [
       [SessionRuntime, runtime],
       [TrackerAdapterFactory, tracker],
+      [RepoHost, host],
       ...(options.overrides ?? []),
     ],
   });
-  return { ...app, runtime, tracker };
+  return { ...app, runtime, tracker, host };
 }
 
 /** The API path of a ticket, to which `/sessions` or `/launch-preview` is added. */

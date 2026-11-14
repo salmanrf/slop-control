@@ -7,12 +7,18 @@ import type {
   TicketPage,
   TicketQuery,
   TicketSource,
+  TicketTransition,
 } from '@slop-control/shared';
 import { ApiException, notFound, validationFailed } from '../common/api-exception';
 import { isUuid } from '../common/uuid';
 import { Database } from '../db/database';
 import { BUILT_IN_SCOPE_KEY, TicketSourceStore } from './ticket-source-store';
-import { TICKET_PAGE_SIZE, TicketNotFoundError, TrackerAdapter } from './tracker';
+import {
+  TICKET_PAGE_SIZE,
+  TicketNotFoundError,
+  TrackerAdapter,
+  TransitionNotAllowedError,
+} from './tracker';
 
 interface TicketRow {
   id: string;
@@ -40,7 +46,10 @@ const STATUSES: Record<BuiltInTicketStatus, { label: string; category: StatusCat
 
 const KEY = /^T-([1-9]\d{0,8})$/;
 
-/** The tracker every workspace has without any setup (FR-6e). Only the dashboard writes to it. */
+/**
+ * The tracker every workspace has without any setup (FR-6e). Only the developer writes to it: from
+ * the dashboard, or by approving a drafted action. No session can (FR-6f).
+ */
 @Injectable()
 export class BuiltInTracker {
   constructor(
@@ -48,15 +57,36 @@ export class BuiltInTracker {
     private readonly sources: TicketSourceStore,
   ) {}
 
-  /** The read side, shaped like any connected tracker so lists and sessions treat it the same. */
+  /** Shaped like any connected tracker, so lists, sessions, and drafted actions treat it the same. */
   adapterFor(source: TicketSource): TrackerAdapter {
+    const held = async (key: string): Promise<TicketRow> => {
+      const row = await this.findRow(source.id, key);
+      if (!row) throw new TicketNotFoundError(`Ticket ${key} doesn't exist.`);
+      return row;
+    };
     return {
       verify: async () => undefined,
       list: (query) => this.list(source.id, query),
-      get: async (key) => {
-        const row = await this.findRow(source.id, key);
-        if (!row) throw new TicketNotFoundError(`Ticket ${key} doesn't exist.`);
-        return toTicket(row);
+      get: async (key) => toTicket(await held(key)),
+      addComment: async (key, body) => {
+        await this.insertComment((await held(key)).id, body);
+        return { url: null };
+      },
+      // Any status can follow any other, as in the dashboard's own status control.
+      listTransitions: async (key) => transitionsFrom((await held(key)).status),
+      transition: async (key, toStatus) => {
+        const row = await held(key);
+        const target = statusNamed(toStatus);
+        if (!target || target === row.status) {
+          throw new TransitionNotAllowedError(
+            `Ticket ${key} can't move to "${toStatus}" from "${STATUSES[row.status].label}".`,
+          );
+        }
+        const { rows } = await this.db.query<TicketRow>(
+          'update built_in_ticket set status = $2, updated_at = now() where id = $1 returning *',
+          [row.id, target],
+        );
+        return toTicket(rows[0]!);
       },
     };
   }
@@ -140,12 +170,16 @@ export class BuiltInTracker {
     if (typeof text !== 'string' || text.trim().length === 0) {
       throw validationFailed('A comment needs some text.');
     }
+    return this.insertComment(ticket.id, text.trim());
+  }
+
+  private insertComment(ticketId: string, body: string): Promise<BuiltInTicketComment> {
     return this.db.transaction(async (tx) => {
       const inserted = await tx.query<CommentRow>(
         'insert into built_in_ticket_comment (ticket_id, body) values ($1, $2) returning *',
-        [ticket.id, text.trim()],
+        [ticketId, body],
       );
-      await tx.query('update built_in_ticket set updated_at = now() where id = $1', [ticket.id]);
+      await tx.query('update built_in_ticket set updated_at = now() where id = $1', [ticketId]);
       return toComment(inserted.rows[0]!);
     });
   }
@@ -227,6 +261,19 @@ function parseFields(body: unknown): {
     fields.status = status as BuiltInTicketStatus;
   }
   return fields;
+}
+
+function transitionsFrom(current: BuiltInTicketStatus): TicketTransition[] {
+  return (Object.keys(STATUSES) as BuiltInTicketStatus[])
+    .filter((status) => status !== current)
+    .map((status) => ({ status: STATUSES[status].label, category: STATUSES[status].category }));
+}
+
+/** A status by the name the tracker reports, e.g. `In review`. */
+function statusNamed(name: string): BuiltInTicketStatus | null {
+  const wanted = name.trim().toLowerCase();
+  const all = Object.keys(STATUSES) as BuiltInTicketStatus[];
+  return all.find((status) => STATUSES[status].label.toLowerCase() === wanted) ?? null;
 }
 
 function statusesFor(category: NonNullable<TicketQuery['category']>): BuiltInTicketStatus[] {

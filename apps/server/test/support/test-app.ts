@@ -8,8 +8,14 @@ import { SignJWT } from 'jose';
 import { Client } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { Redactor } from '../../src/common/redactor';
 import { AppConfig } from '../../src/config';
-import { CANARY_GITHUB_TOKEN, TEST_DATABASE_URL, TEST_JWT_SECRET } from './test-env';
+import {
+  CANARY_GITHUB_TOKEN,
+  TEST_DATABASE_URL,
+  TEST_JWT_SECRET,
+  TEST_SECRET_KEY,
+} from './test-env';
 
 export interface TestApp {
   app: INestApplication;
@@ -19,6 +25,7 @@ export interface TestApp {
     get(path: string): request.Test;
     post(path: string): request.Test;
     patch(path: string): request.Test;
+    put(path: string): request.Test;
     delete(path: string): request.Test;
   };
   dataDir: string;
@@ -36,6 +43,11 @@ export interface TestAppOptions {
   heartbeatMs?: number;
   /** How long a stop request waits for the round to end. */
   stopGraceMs?: number;
+  /** Null stands for a server with no `SLOP_SECRET_KEY`. */
+  secretKey?: string | null;
+  githubApiUrl?: string;
+  githubGitUrl?: string;
+  fetchTimeoutMs?: number;
 }
 
 export async function signToken(
@@ -57,8 +69,11 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     jwt: options.jwt ?? { kind: 'secret', secret: TEST_JWT_SECRET },
     jwtAudience: 'authenticated',
     dataDir,
-    githubToken: CANARY_GITHUB_TOKEN,
-    githubApiUrl: 'http://127.0.0.1:9',
+    githubApiUrl: options.githubApiUrl ?? 'http://127.0.0.1:9',
+    githubGitUrl: options.githubGitUrl ?? 'http://127.0.0.1:9',
+    secretKey: options.secretKey === undefined ? TEST_SECRET_KEY : options.secretKey,
+    githubTokenIgnored: false,
+    fetchTimeoutMs: options.fetchTimeoutMs ?? 15_000,
     sshConfigFile: options.sshConfigFile ?? null,
     heartbeatMs: options.heartbeatMs ?? 30_000,
     stopGraceMs: options.stopGraceMs ?? 5000,
@@ -74,6 +89,8 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   }
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
+  // Stands for a stored credential, in the suites that check nothing leaks one (NFR-4).
+  app.get(Redactor).add(CANARY_GITHUB_TOKEN);
   await app.init();
 
   const token = await signToken();
@@ -86,6 +103,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
       get: (path) => withAuth(http.get(path)),
       post: (path) => withAuth(http.post(path)),
       patch: (path) => withAuth(http.patch(path)),
+      put: (path) => withAuth(http.put(path)),
       delete: (path) => withAuth(http.delete(path)),
     },
     dataDir,
@@ -98,8 +116,8 @@ export async function resetDatabase(): Promise<void> {
   const client = new Client({ connectionString: TEST_DATABASE_URL });
   await client.connect();
   await client.query(
-    `truncate built_in_ticket_comment, built_in_ticket, session_artifact, session, phase_setup,
-       ticket_source, linked_repo, workspace cascade`,
+    `truncate drafted_action, secret, built_in_ticket_comment, built_in_ticket, session_artifact,
+       session, phase_setup, ticket_source, linked_repo, workspace cascade`,
   );
   await client.end();
 }

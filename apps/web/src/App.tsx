@@ -10,6 +10,7 @@ import {
 import { useEffect, useState } from 'react';
 import { WorkspaceLayout } from './components/AppShell';
 import { clearSignInExpired, supabase, wasSignInExpired } from './lib/supabase';
+import { ApprovalsPage } from './pages/ApprovalsPage';
 import { PhaseSetupsPage } from './pages/PhaseSetupsPage';
 import { SessionPage } from './pages/SessionPage';
 import { SignInPage } from './pages/SignInPage';
@@ -41,6 +42,11 @@ const routeTree = rootRoute.addChildren([
       getParentRoute: () => workspaceRoute,
       path: 'sources',
       component: SourcesPage,
+    }),
+    createRoute({
+      getParentRoute: () => workspaceRoute,
+      path: 'approvals',
+      component: ApprovalsPage,
     }),
     createRoute({
       getParentRoute: () => workspaceRoute,

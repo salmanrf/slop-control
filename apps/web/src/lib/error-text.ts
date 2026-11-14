@@ -14,6 +14,9 @@ const CODE_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   BUILT_IN_CREATION_OFF:
     'New built-in tickets are off while a ticket source is connected. Create the ticket in that tracker.',
   NO_LINKED_REPO: 'Link a repo to this workspace before starting a session.',
+  ACTION_ALREADY_DECIDED: 'This action was already approved or rejected.',
+  ACTION_STALE:
+    'The branch has moved since you looked. Check the commits and the changes again, then approve.',
 };
 
 export function errorText(error: unknown): string {
